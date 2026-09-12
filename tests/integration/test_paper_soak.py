@@ -17,7 +17,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from aegis.core.clock import at_utc, to_ms
+from aegis.core.clock import at_utc
 from aegis.core.errors import ExchangeUnreachable
 from aegis.core.types import EngineState
 from aegis.strategy_trend.runner import TrendRunner
