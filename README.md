@@ -110,6 +110,47 @@ Total infrastructure cost is €0 (≤ €6/month on the VPS fallback). See
 `docs/RUNBOOK.md` for the operational procedures and `docs/RISK.md` for the
 consolidated rule table.
 
+## What is proven, and what is not
+
+The suite is offline and deterministic — `FakeGateway`, `FakeClock`, in-memory
+SQLite — so every run is the same run. `python tools/self_report.py` regenerates
+`SELF-REPORT.md`, which reports PASS / FAIL / **NO TEST** per acceptance
+criterion by reading the mapping out of the test names rather than asserting it.
+
+Proven here:
+
+- Every Appendix C canonical vector reproduces the PRD **exactly** — signal,
+  volatility, sizing, governor and hysteresis — and those numbers were verified
+  against the PRD's own formulas before any code existed.
+- A whole trading day end to end: universe → bars → signals → risk model →
+  sizing → plan → orders → fills → accounting → reports, at 100 % rebalance
+  completion.
+- Seven simulated days including a forced process kill mid-rebalance and a
+  forced `SETTLING` status change (PRD Section 14.1), with the three caps
+  holding on every one of them.
+- The backtester cannot look ahead: a run that stops early reproduces the longer
+  run's equity path exactly, which no leak of future information could survive.
+- The two sleeves cannot see each other's rows, proved reflectively over every
+  repository read.
+
+**Not** proven here, and it matters:
+
+- **P0 has not been evaluated against real data.** The build sandbox's network
+  policy denies `data.binance.vision`, so the 2021→now backtest has never been
+  run. The archive loader is tested against a stubbed fetcher covering the real
+  file layout, caching, missing months and corrupt archives; on a host with
+  access, `--fetch-archive` then a normal run produces the evidence. See
+  `docs/BACKTEST.md`.
+- **Wall-clock endurance.** The 7-day soak runs in simulated time, so it cannot
+  catch a leak, a file-handle exhaustion or a slow memory creep. That is what
+  the real P1 paper soak on the host is for.
+- **The phase clocks** (8 weeks paper, 12 weeks micro-live) are calendar time.
+- **CARRY's strategy modules** belong to their own PRD. The shared layer, schema
+  and dashboard already carry CARRY; the engine refuses `--strategy carry`
+  rather than running TREND's logic against a carry sub-account.
+
+`docs/COVERAGE.md` is the criterion-by-criterion audit.
+
 ## Documentation
 
 - `docs/ARCHITECTURE.md` — the interface contract every module is written against
@@ -117,3 +158,5 @@ consolidated rule table.
 - `docs/RISK.md` — the risk supervisor rule table and kill rules
 - `docs/RUNBOOK.md` — day-to-day operation, incident response, restore drill
 - `docs/BACKTEST.md` — how the point-in-time backtest is built and reproduced
+- `docs/COVERAGE.md` — every acceptance criterion, with its code and its proof
+- `SELF-REPORT.md` — generated PASS/FAIL per criterion (`python tools/self_report.py`)
