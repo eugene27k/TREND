@@ -11,7 +11,7 @@ from aegis.ops.controls import CONFIRM_TOKEN, Controls
 
 
 def _save(ctx: Context, **over) -> None:
-    base = dict(
+    base = dict(  # noqa: C408
         state=str(EngineState.IDLE),
         phase="P0_BACKTEST",
         paused=False,
@@ -201,7 +201,12 @@ def test_an_unknown_configured_phase_falls_back_to_p0(clock, gateway, repos) -> 
     from aegis.ops.alerts import AlertBus
 
     tuned = load_config("config/trend.yaml", {"phase": {"current": "NOT_A_PHASE"}}, use_env=False)
-    ctx = Context(cfg=tuned, clock=clock, gateway=gateway, repos=repos,
-                  alerts=AlertBus(repos.alerts, clock, Strategy.TREND))
+    ctx = Context(
+        cfg=tuned,
+        clock=clock,
+        gateway=gateway,
+        repos=repos,
+        alerts=AlertBus(repos.alerts, clock, Strategy.TREND),
+    )
 
     assert Controls(ctx).state()["phase"] == "P0_BACKTEST"

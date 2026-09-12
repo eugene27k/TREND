@@ -99,10 +99,16 @@ class BacktestResponse(BaseModel):
 
 def _tracking_row(r: dict[str, Any]) -> TrackingRow:
     return TrackingRow(
-        day=r["day"], live_pnl=float(r["live_pnl"]), ref_pnl=float(r["ref_pnl"]),
-        cum_live=float(r["cum_live"]), cum_ref=float(r["cum_ref"]), corr_30d=r["corr_30d"],
-        cum_diff_frac=float(r["cum_diff_frac"]), cost_ratio=r["cost_ratio"],
-        turnover_ratio=r["turnover_ratio"], in_bounds=bool(r["in_bounds"]),
+        day=r["day"],
+        live_pnl=float(r["live_pnl"]),
+        ref_pnl=float(r["ref_pnl"]),
+        cum_live=float(r["cum_live"]),
+        cum_ref=float(r["cum_ref"]),
+        corr_30d=r["corr_30d"],
+        cum_diff_frac=float(r["cum_diff_frac"]),
+        cost_ratio=r["cost_ratio"],
+        turnover_ratio=r["turnover_ratio"],
+        in_bounds=bool(r["in_bounds"]),
         breach_days=int(r["breach_days"]),
     )
 
@@ -125,8 +131,12 @@ def backtest(
     detail = None
     if row is not None:
         detail = RunDetail(
-            run_id=row["run_id"], created_ts=int(row["created_ts"]), start_day=row["start_day"],
-            end_day=row["end_day"], variant=row["variant"], git_commit=row["git_commit"],
+            run_id=row["run_id"],
+            created_ts=int(row["created_ts"]),
+            start_day=row["start_day"],
+            end_day=row["end_day"],
+            variant=row["variant"],
+            git_commit=row["git_commit"],
             duration_s=float(row["duration_s"]),
             metrics=json_loads(row["metrics_json"], {}) or {},
             manifest=json_loads(row["manifest_json"], {}) or {},
@@ -142,8 +152,12 @@ def backtest(
         as_of_ts=get_registry(request).now_ms(),
         runs=[
             RunRow(
-                run_id=r["run_id"], created_ts=int(r["created_ts"]), start_day=r["start_day"],
-                end_day=r["end_day"], variant=r["variant"], git_commit=r["git_commit"],
+                run_id=r["run_id"],
+                created_ts=int(r["created_ts"]),
+                start_day=r["start_day"],
+                end_day=r["end_day"],
+                variant=r["variant"],
+                git_commit=r["git_commit"],
                 duration_s=float(r["duration_s"]),
             )
             for r in runs
@@ -151,16 +165,22 @@ def backtest(
         run=detail,
         robustness=[
             RobustnessRow(
-                variant=r["variant"], net_pnl=float(r["net_pnl"]), sharpe=float(r["sharpe"]),
-                max_dd=float(r["max_dd"]), sign_ok=bool(r["sign_ok"]),
+                variant=r["variant"],
+                net_pnl=float(r["net_pnl"]),
+                sharpe=float(r["sharpe"]),
+                max_dd=float(r["max_dd"]),
+                sign_ok=bool(r["sign_ok"]),
                 detail=json_loads(r["detail_json"], {}) or {},
             )
             for r in (repos.backtest.robustness(chosen) if chosen else [])
         ],
         walkforward=[
             WalkforwardRow(
-                window=r["window"], param_set=r["param_set"], test_sharpe=float(r["test_sharpe"]),
-                rank=int(r["rank"]), n_params=int(r["n_params"]),
+                window=r["window"],
+                param_set=r["param_set"],
+                test_sharpe=float(r["test_sharpe"]),
+                rank=int(r["rank"]),
+                n_params=int(r["n_params"]),
                 default_in_top_half=bool(r["default_in_top_half"]),
                 is_default=bool(r["is_default"]),
             )

@@ -114,8 +114,11 @@ def signals(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Sig
             )
         )
     return SignalsResponse(
-        strategy=str(sleeve.strategy), as_of_ts=now_ms, day=day,
-        rebalance_id=rebalance_id, rows=rows,
+        strategy=str(sleeve.strategy),
+        as_of_ts=now_ms,
+        day=day,
+        rebalance_id=rebalance_id,
+        rows=rows,
     )
 
 
@@ -132,7 +135,11 @@ def signal_history(
         days=days,
         points=[
             SignalHistoryPoint(
-                day=r["day"], signal=float(r["signal"]), u1=r["u1"], u2=r["u2"], u3=r["u3"],
+                day=r["day"],
+                signal=float(r["signal"]),
+                u1=r["u1"],
+                u2=r["u2"],
+                u3=r["u3"],
                 warm=bool(r["warm"]),
             )
             for r in rows

@@ -26,8 +26,13 @@ EXPECTED_DAILY = (
 
 
 def _ctx(cfg, report_clock: FakeClock, gateway, repos: Repositories) -> Context:
-    return Context(cfg=cfg, clock=report_clock, gateway=gateway, repos=repos,
-                   alerts=AlertBus(repos.alerts, report_clock, Strategy.TREND))
+    return Context(
+        cfg=cfg,
+        clock=report_clock,
+        gateway=gateway,
+        repos=repos,
+        alerts=AlertBus(repos.alerts, report_clock, Strategy.TREND),
+    )
 
 
 @pytest.fixture
@@ -80,9 +85,15 @@ def test_a_cap_breach_downgrades_the_risk_line_to_amber(cfg, report_clock, gatew
 
     end_ms = day_start_ms(DAY) + DAY_MS
     repos.snapshots.add(
-        AccountState(ts_ms=end_ms - 1, wallet_balance=9874.10, margin_balance=9874.10,
-                     unrealized_pnl=0.0, available_balance=1000.0, maint_margin=9874.10 * 0.09,
-                     initial_margin=2000.0),
+        AccountState(
+            ts_ms=end_ms - 1,
+            wallet_balance=9874.10,
+            margin_balance=9874.10,
+            unrealized_pnl=0.0,
+            available_balance=1000.0,
+            maint_margin=9874.10 * 0.09,
+            initial_margin=2000.0,
+        ),
         [],
         gross=3.0 * 9874.10,
         net=0.0,
@@ -100,11 +111,18 @@ def test_a_high_margin_ratio_reports_red(cfg, report_clock, gateway, repos) -> N
 
     end_ms = day_start_ms(DAY) + DAY_MS
     repos.snapshots.add(
-        AccountState(ts_ms=end_ms - 1, wallet_balance=1000.0, margin_balance=1000.0,
-                     unrealized_pnl=0.0, available_balance=10.0, maint_margin=400.0,
-                     initial_margin=500.0),
+        AccountState(
+            ts_ms=end_ms - 1,
+            wallet_balance=1000.0,
+            margin_balance=1000.0,
+            unrealized_pnl=0.0,
+            available_balance=10.0,
+            maint_margin=400.0,
+            initial_margin=500.0,
+        ),
         [],
-        gross=0.0, net=0.0,
+        gross=0.0,
+        net=0.0,
     )
     ctx = _ctx(cfg, report_clock, gateway, repos)
 
@@ -144,8 +162,13 @@ def test_a_rebalance_summary_for_an_unknown_id_renders_n_a(rctx: Context) -> Non
 
 def test_us_t17_ac3_governor_alert_matches_appendix_d(rctx: Context) -> None:
     body = Reporter(rctx).governor_alert(
-        dd=0.123, peak_equity=10240.00, g_before=1.0, g_after=0.5,
-        gross_before=1.30, gross_after=0.65, n_orders=14,
+        dd=0.123,
+        peak_equity=10240.00,
+        g_before=1.0,
+        g_after=0.5,
+        gross_before=1.30,
+        gross_after=0.65,
+        n_orders=14,
     )
 
     assert body.split("\n") == [
@@ -170,8 +193,15 @@ def test_the_restore_rung_comes_from_the_configured_governor_ladder(rctx: Contex
 
 
 def test_weekly_report_carries_the_metric_contribution_and_tracking_tables(rctx: Context) -> None:
-    rctx.repos.tracking.upsert(DAY, corr_30d=0.82, cum_diff_frac=0.004, cost_ratio=1.2,
-                               turnover_ratio=1.1, in_bounds=True, breach_days=0)
+    rctx.repos.tracking.upsert(
+        DAY,
+        corr_30d=0.82,
+        cum_diff_frac=0.004,
+        cost_ratio=1.2,
+        turnover_ratio=1.1,
+        in_bounds=True,
+        breach_days=0,
+    )
 
     body = Reporter(rctx).weekly("2026-W37", rctx.now_ms())
     lines = body.split("\n")
@@ -260,9 +290,15 @@ def test_weekly_and_monthly_keys_become_due_after_their_period_closes(rctx: Cont
 def _seed_plan(repos: Repositories) -> None:
     """Three symbols whose deltas exercise every transition phrase."""
     repos.rebalances.finish(
-        REBALANCE_ID, ended_ts=day_start_ms(DAY) + 28 * 60_000, status="complete",
-        completion_pct=100.0, traded_notional=3120.0, fees=4.90, avg_slippage_bps=1.2,
-        maker_ratio=0.76, residuals=[],
+        REBALANCE_ID,
+        ended_ts=day_start_ms(DAY) + 28 * 60_000,
+        status="complete",
+        completion_pct=100.0,
+        traded_notional=3120.0,
+        fees=4.90,
+        avg_slippage_bps=1.2,
+        maker_ratio=0.76,
+        residuals=[],
     )
     rows = [
         ("SOLUSDT", 410.0, -3.0, 0.0),
@@ -340,9 +376,15 @@ def test_net_and_single_cap_breaches_are_named(cfg, report_clock, gateway, repos
     end_ms = day_start_ms(DAY) + DAY_MS
     equity = 1000.0
     repos.snapshots.add(
-        AccountState(ts_ms=end_ms - 1, wallet_balance=equity, margin_balance=equity,
-                     unrealized_pnl=0.0, available_balance=100.0, maint_margin=10.0,
-                     initial_margin=100.0),
+        AccountState(
+            ts_ms=end_ms - 1,
+            wallet_balance=equity,
+            margin_balance=equity,
+            unrealized_pnl=0.0,
+            available_balance=100.0,
+            maint_margin=10.0,
+            initial_margin=100.0,
+        ),
         [Position(symbol="BTCUSDT", qty=1.0, entry_price=1.0, mark_price=400.0)],
         gross=2.0 * equity,
         net=1.9 * equity,
@@ -357,11 +399,24 @@ def test_net_and_single_cap_breaches_are_named(cfg, report_clock, gateway, repos
 def test_the_regime_table_is_rendered_when_the_metric_exists(rctx: Context) -> None:
     from aegis.core.types import MetricValue
 
-    rctx.repos.metrics.save_many([
-        MetricValue(Strategy.TREND, "regime_table", "30d", None, rctx.now_ms(), n_obs=3,
-                    extra={"buckets": {"btc_up": {"months": 2, "pnl": 120.0},
-                                       "btc_down": {"months": 1, "pnl": -30.0}}}),
-    ])
+    rctx.repos.metrics.save_many(
+        [
+            MetricValue(
+                Strategy.TREND,
+                "regime_table",
+                "30d",
+                None,
+                rctx.now_ms(),
+                n_obs=3,
+                extra={
+                    "buckets": {
+                        "btc_up": {"months": 2, "pnl": 120.0},
+                        "btc_down": {"months": 1, "pnl": -30.0},
+                    }
+                },
+            ),
+        ]
+    )
 
     line = Reporter(rctx).weekly("2026-W37", rctx.now_ms()).split("\n")[6]
 
@@ -374,9 +429,18 @@ def test_a_report_uses_the_last_bnb_low_alert_when_the_state_has_no_reading(
     from tests.ops.conftest import seed_daily as _seed
 
     _seed(repos)
-    repos.state.save(state="IDLE", phase="P1_PAPER", paused=False, stopped=False,
-                     safe_mode=False, halt_reason="", governor_g=1.0, blocks=[], context={},
-                     now_ms=day_start_ms(DAY))
+    repos.state.save(
+        state="IDLE",
+        phase="P1_PAPER",
+        paused=False,
+        stopped=False,
+        safe_mode=False,
+        halt_reason="",
+        governor_g=1.0,
+        blocks=[],
+        context={},
+        now_ms=day_start_ms(DAY),
+    )
     ctx = _ctx(cfg, report_clock, gateway, repos)
     ctx.alerts.warn("BNB_LOW", "cover is thin", {"balance": 1.0, "days": 5.0})
 

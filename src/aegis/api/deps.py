@@ -37,7 +37,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from aegis.core.clock import Clock, SystemClock, day_of, day_start_ms
+from aegis.core.clock import Clock, SystemClock, day_of
 from aegis.core.config import AppConfig, load_config
 from aegis.core.types import EngineState, Phase, RiskStatus, Strategy
 from aegis.storage.db import Database, json_loads
@@ -87,7 +87,10 @@ class ReadOnlyDatabase(Database):
         uri = f"file:{path}?mode=ro"
         try:
             return sqlite3.connect(
-                uri, uri=True, check_same_thread=False, isolation_level=None,
+                uri,
+                uri=True,
+                check_same_thread=False,
+                isolation_level=None,
                 timeout=busy_timeout_ms / 1000,
             )
         except sqlite3.OperationalError:
@@ -95,13 +98,15 @@ class ReadOnlyDatabase(Database):
             # through mode=ro. query_only gives the same refusal from the same
             # engine, so the guarantee survives the fallback.
             conn = sqlite3.connect(
-                str(path), check_same_thread=False, isolation_level=None,
+                str(path),
+                check_same_thread=False,
+                isolation_level=None,
                 timeout=busy_timeout_ms / 1000,
             )
             conn.execute("PRAGMA query_only = ON")
             return conn
 
-    def migrate(self, directory: Path | None = None) -> list[str]:  # pragma: no cover - guard
+    def migrate(self, directory: Path | None = None) -> list[str]:  # noqa: ARG002 - signature match
         raise RuntimeError("the API never migrates a database")
 
 
@@ -127,15 +132,15 @@ class StrategyDeps:
 class Registry:
     """Every sleeve the API can answer for, resolved once at startup."""
 
-    def __init__(self, sleeves: Mapping[Strategy, StrategyDeps], clock: Clock,
-                 started_ms: int) -> None:
+    def __init__(self, sleeves: Mapping[Strategy, StrategyDeps], clock: Clock, started_ms: int) -> None:
         self._sleeves = dict(sleeves)
         self.clock = clock
         self.started_ms = started_ms
 
     @classmethod
-    def build(cls, config_paths: Mapping[str, str | Path] | None = None,
-              clock: Clock | None = None) -> Registry:
+    def build(
+        cls, config_paths: Mapping[str, str | Path] | None = None, clock: Clock | None = None
+    ) -> Registry:
         clock = clock or SystemClock()
         paths = dict(config_paths) if config_paths is not None else dict(DEFAULT_CONFIG_PATHS)
         sleeves: dict[Strategy, StrategyDeps] = {}
@@ -156,11 +161,10 @@ class Registry:
         sleeve = self._sleeves.get(parsed)
         if sleeve is None:
             available = [str(s) for s in self.strategies]
-            raise HTTPException(404, f"strategy {parsed} is not configured on this host; available: {available}")
+            raise HTTPException(
+                404, f"strategy {parsed} is not configured on this host; available: {available}"
+            )
         return sleeve
-
-    def has(self, strategy: Strategy) -> bool:
-        return strategy in self._sleeves
 
     def now_ms(self) -> int:
         return self.clock.now_ms()
@@ -172,15 +176,23 @@ class Registry:
 
     # -- the one write path ------------------------------------------------- #
 
-    def append_control(self, sleeve: StrategyDeps, action: str, operator: str, reason: str,
-                       payload: dict[str, Any], now_ms: int) -> None:
+    def append_control(
+        self,
+        sleeve: StrategyDeps,
+        action: str,
+        operator: str,
+        reason: str,
+        payload: dict[str, Any],
+        now_ms: int,
+    ) -> None:
         """Append one ``control_log`` row on a connection that lives for one call.
 
         The engine picks the row up on its next tick. Nothing else in the API
         may open a writable connection, and this one writes no other table.
         """
-        db = Database(sleeve.db_path, wal=sleeve.cfg.storage.wal,
-                      busy_timeout_ms=sleeve.cfg.storage.busy_timeout_ms)
+        db = Database(
+            sleeve.db_path, wal=sleeve.cfg.storage.wal, busy_timeout_ms=sleeve.cfg.storage.busy_timeout_ms
+        )
         try:
             StateRepo(db, sleeve.strategy).log_control(action, operator, reason, payload, now_ms)
         finally:
@@ -203,8 +215,7 @@ def _try_open(name: str, config_path: str | Path) -> StrategyDeps | None:
         db = ReadOnlyDatabase(db_path, busy_timeout_ms=cfg.storage.busy_timeout_ms)
     except sqlite3.Error:
         return None
-    return StrategyDeps(strategy=strategy, cfg=cfg, db_path=db_path, db=db,
-                        repos=Repositories(db, strategy))
+    return StrategyDeps(strategy=strategy, cfg=cfg, db_path=db_path, db=db, repos=Repositories(db, strategy))
 
 
 def parse_strategy(name: str) -> Strategy | None:
@@ -243,14 +254,6 @@ class Window:
     @property
     def days(self) -> int:
         return (self.end_day - self.start_day).days + 1
-
-    @property
-    def start_ms(self) -> int:
-        return day_start_ms(self.start_day)
-
-    @property
-    def end_ms(self) -> int:
-        return day_start_ms(self.end_day) + 86_400_000
 
 
 def window_for(period: str, now_ms: int, first_day: date | None) -> Window:

@@ -143,8 +143,13 @@ def operations(
         last_detail=str(last_recon["detail"]) if last_recon else "",
         open_breaks=len(open_breaks),
         breaks=[
-            {"id": b["id"], "ts": b["ts"], "kind": b["kind"], "detail": b["detail"],
-             "breaks": json_loads(b["breaks_json"], [])}
+            {
+                "id": b["id"],
+                "ts": b["ts"],
+                "kind": b["kind"],
+                "detail": b["detail"],
+                "breaks": json_loads(b["breaks_json"], []),
+            }
             for b in open_breaks
         ],
     )
@@ -179,23 +184,33 @@ def operations(
         infra=infra,
         alerts=[
             AlertRow(
-                id=int(a["id"]), ts=int(a["ts"]), severity=a["severity"], code=a["code"],
-                message=a["message"], acked=a["acked_ts"] is not None,
-                delivered=bool(a["delivered"]), context=json_loads(a["context_json"], {}) or {},
+                id=int(a["id"]),
+                ts=int(a["ts"]),
+                severity=a["severity"],
+                code=a["code"],
+                message=a["message"],
+                acked=a["acked_ts"] is not None,
+                delivered=bool(a["delivered"]),
+                context=json_loads(a["context_json"], {}) or {},
             )
             for a in repos.alerts.recent(alert_limit)
         ],
         unacked_critical=len(repos.alerts.unacked_critical()),
         control_log=[
             ControlRow(
-                id=int(c["id"]), ts=int(c["ts"]), action=c["action"], operator=c["operator"],
-                reason=c["reason"], payload=json_loads(c["payload_json"], {}) or {},
+                id=int(c["id"]),
+                ts=int(c["ts"]),
+                action=c["action"],
+                operator=c["operator"],
+                reason=c["reason"],
+                payload=json_loads(c["payload_json"], {}) or {},
             )
             for c in repos.state.controls(control_limit)
         ],
         reports=[
-            ReportRow(kind=r["kind"], period_key=r["period_key"], ts=int(r["ts"]),
-                      delivered=bool(r["delivered"]))
+            ReportRow(
+                kind=r["kind"], period_key=r["period_key"], ts=int(r["ts"]), delivered=bool(r["delivered"])
+            )
             for r in repos.reports.recent(10)
         ],
     )

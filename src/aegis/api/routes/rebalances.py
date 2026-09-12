@@ -168,10 +168,15 @@ def rebalance_detail(
         cursor=int(row["cursor"]),
         targets=[
             TargetRow(
-                symbol=t["symbol"], signal=float(t["signal"]), vol=float(t["vol"]),
-                raw=float(t["raw"]), target_notional=float(t["target_notional"]),
-                target_qty=float(t["target_qty"]), current_qty=float(t["current_qty"]),
-                delta_notional=float(t["delta_notional"]), funding_ann=float(t["funding_ann"]),
+                symbol=t["symbol"],
+                signal=float(t["signal"]),
+                vol=float(t["vol"]),
+                raw=float(t["raw"]),
+                target_notional=float(t["target_notional"]),
+                target_qty=float(t["target_qty"]),
+                current_qty=float(t["current_qty"]),
+                delta_notional=float(t["delta_notional"]),
+                funding_ann=float(t["funding_ann"]),
                 funding_haircut=float(t["funding_haircut"]),
                 caps_applied=list(json_loads(t["caps_json"], []) or []),
                 traded=bool(t["traded"]),
@@ -180,20 +185,35 @@ def rebalance_detail(
         ],
         slices=[
             SliceRow(
-                slice_id=s["slice_id"], symbol=s["symbol"], seq=int(s["seq"]), side=s["side"],
-                qty=float(s["qty"]), reduce_only=bool(s["reduce_only"]),
+                slice_id=s["slice_id"],
+                symbol=s["symbol"],
+                seq=int(s["seq"]),
+                side=s["side"],
+                qty=float(s["qty"]),
+                reduce_only=bool(s["reduce_only"]),
                 placed_ts=int(s["placed_ts"]),
                 ended_ts=int(s["ended_ts"]) if s["ended_ts"] is not None else None,
-                repegs=int(s["repegs"]), outcome=s["outcome"], fill_qty=float(s["fill_qty"]),
-                avg_price=float(s["avg_price"]), taker=bool(s["taker"]),
+                repegs=int(s["repegs"]),
+                outcome=s["outcome"],
+                fill_qty=float(s["fill_qty"]),
+                avg_price=float(s["avg_price"]),
+                taker=bool(s["taker"]),
             )
             for s in repos.slices.for_rebalance(rebalance_id)
         ],
         fills=[
             FillRow(
-                trade_id=f.trade_id, order_id=f.order_id, symbol=f.symbol, side=str(f.side),
-                qty=f.qty, price=f.price, fee=f.fee, is_maker=f.is_maker,
-                realized_pnl=f.realized_pnl, slippage_bps=f.slippage_bps, ts=f.ts_ms,
+                trade_id=f.trade_id,
+                order_id=f.order_id,
+                symbol=f.symbol,
+                side=str(f.side),
+                qty=f.qty,
+                price=f.price,
+                fee=f.fee,
+                is_maker=f.is_maker,
+                realized_pnl=f.realized_pnl,
+                slippage_bps=f.slippage_bps,
+                ts=f.ts_ms,
             )
             for f in repos.fills.for_rebalance(rebalance_id)
         ],

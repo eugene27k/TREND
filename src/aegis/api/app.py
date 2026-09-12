@@ -43,8 +43,7 @@ class StrategiesResponse(BaseModel):
     strategies: list[StrategyInfo]
 
 
-def create_app(config_paths: Mapping[str, str | Path] | None = None,
-               clock: Clock | None = None) -> FastAPI:
+def create_app(config_paths: Mapping[str, str | Path] | None = None, clock: Clock | None = None) -> FastAPI:
     """Build the API over the sleeves named in ``config_paths``.
 
     ``config_paths`` maps a strategy name to its YAML file; the default is the

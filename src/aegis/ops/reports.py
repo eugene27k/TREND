@@ -152,9 +152,7 @@ class Reporter:
         self.ctx.repos.reports.save(DAILY, day.isoformat(), body, now_ms)
         return body
 
-    def _equity_line(
-        self, day: date, equity: float | None, row: Mapping[str, Any] | None, end_ms: int
-    ) -> str:
+    def _equity_line(self, equity: float | None, row: Mapping[str, Any] | None, end_ms: int) -> str:
         day_change = None if row is None else _float(row["twr_factor"])
         since = None if row is None else _float(row["twr_index"])
         dd = None if row is None else _float(row["drawdown"])

@@ -74,9 +74,12 @@ def universe(
         result = repos.universe.month(month)
         entries = [
             UniverseEntryRow(
-                symbol=e.symbol, rank=e.rank,
+                symbol=e.symbol,
+                rank=e.rank,
                 median_quote_volume_30d=e.median_quote_volume_30d,
-                history_days=e.history_days, included=e.included, reason=e.reason,
+                history_days=e.history_days,
+                included=e.included,
+                reason=e.reason,
             )
             for e in (result.entries if result else ())
         ]
@@ -103,8 +106,12 @@ def universe(
         current_symbols=repos.universe.symbols(current_month) if current_month else [],
         months=rows,
         illiquid=[
-            IlliquidRow(symbol=r["symbol"], flagged_ts=int(r["flagged_ts"]),
-                        until_ts=int(r["until_ts"]), reason=r["reason"])
+            IlliquidRow(
+                symbol=r["symbol"],
+                flagged_ts=int(r["flagged_ts"]),
+                until_ts=int(r["until_ts"]),
+                reason=r["reason"],
+            )
             for r in repos.illiquid.active(now_ms)
         ],
     )

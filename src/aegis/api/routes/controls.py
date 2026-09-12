@@ -10,7 +10,8 @@ day, disagree with the process that is actually holding the positions.
 The validation here is a pre-flight, not a substitute for the engine's: the
 destructive actions need the typed confirmation of Aegis US-18 and
 ``clear_halt`` needs a written reason (US-T13 AC 3), so an unusable row never
-reaches the log in the first place.
+reaches the log in the first place. The token is forwarded in the payload rather
+than consumed here, because the engine re-checks it — one rule, one place.
 """
 
 from __future__ import annotations
@@ -81,8 +82,13 @@ def controls(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Co
         actions=[START, PAUSE, RESUME, STOP, FLATTEN_ALL, CLEAR_HALT],
         confirm_required=list(_NEEDS_CONFIRM),
         log=[
-            ControlLogRow(id=int(c["id"]), ts=int(c["ts"]), action=c["action"],
-                          operator=c["operator"], reason=c["reason"])
+            ControlLogRow(
+                id=int(c["id"]),
+                ts=int(c["ts"]),
+                action=c["action"],
+                operator=c["operator"],
+                reason=c["reason"],
+            )
             for c in repos.state.controls(100)
         ],
     )
@@ -102,7 +108,10 @@ def submit_control(
         body.action,
         body.operator,
         body.reason,
-        {"source": "api", "confirmed": body.action in _NEEDS_CONFIRM},
+        # The token is forwarded, not consumed: the engine re-checks it, so the
+        # rule lives in exactly one place (aegis.ops.controls) and a request that
+        # somehow bypassed this pre-flight still cannot stop or flatten anything.
+        {"source": "api", "confirm": body.confirm},
         now_ms,
     )
     return ControlAccepted(

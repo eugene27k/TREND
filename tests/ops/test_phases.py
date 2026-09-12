@@ -49,9 +49,15 @@ def test_section7_p0_reports_actual_none_when_there_is_no_backtest(ctx: Context)
 def test_section7_p1_reports_actual_none_for_every_missing_input(ctx: Context) -> None:
     named = _criteria(PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW))
 
-    for name in ("paper_weeks", "rebalances_completed", "rebalance_completion_pct",
-                 "maker_ratio", "realised_slippage_within_model", "tracking_in_bounds",
-                 "heartbeat_uptime_pct"):
+    for name in (
+        "paper_weeks",
+        "rebalances_completed",
+        "rebalance_completion_pct",
+        "maker_ratio",
+        "realised_slippage_within_model",
+        "tracking_in_bounds",
+        "heartbeat_uptime_pct",
+    ):
         assert named[name]["actual"] is None, name
         assert named[name]["passed"] is False, name
 
@@ -69,9 +75,17 @@ def test_a_heartbeat_table_with_no_rows_is_missing_evidence_not_zero_uptime(ctx:
 
 def _save_backtest(ctx: Context, evidence: dict, robustness: list[dict] | None = None) -> None:
     ctx.repos.backtest.save_run(
-        "run-1", created_ts=NOW, start_day="2021-01-01", end_day="2026-09-01",
-        variant="default", params={}, manifest={}, git_commit="abc",
-        metrics={"p0_evidence": evidence}, equity=[], duration_s=1.0,
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day="2026-09-01",
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={"p0_evidence": evidence},
+        equity=[],
+        duration_s=1.0,
     )
     if robustness is not None:
         ctx.repos.backtest.save_robustness("run-1", robustness)
@@ -124,8 +138,10 @@ def test_section7_p0_fails_on_each_threshold_independently(
 
 
 def test_section7_p0_fails_when_a_robustness_variant_flips_the_sign(ctx: Context) -> None:
-    flipped = [*PASSING_ROBUSTNESS, {"variant": "no_funding", "net_pnl": -10.0, "sharpe": -0.2,
-                                     "max_dd": 0.4, "sign_ok": False}]
+    flipped = [
+        *PASSING_ROBUSTNESS,
+        {"variant": "no_funding", "net_pnl": -10.0, "sharpe": -0.2, "max_dd": 0.4, "sign_ok": False},
+    ]
     _save_backtest(ctx, PASSING_P0, flipped)
 
     result = PhaseGates(ctx).evaluate(Phase.P0_BACKTEST, NOW)
@@ -147,8 +163,14 @@ def test_section7_p0_robustness_is_unanswered_when_no_variant_ran(ctx: Context) 
 # --------------------------------------------------------------------------- #
 
 
-def _seed_p1(ctx: Context, *, weeks: float = 9.0, rebalances: int = 40,
-             completion: float = 98.0, uptime_gap: bool = False) -> None:
+def _seed_p1(
+    ctx: Context,
+    *,
+    weeks: float = 9.0,
+    rebalances: int = 40,
+    completion: float = 98.0,
+    uptime_gap: bool = False,
+) -> None:
     _save_backtest(ctx, PASSING_P0, PASSING_ROBUSTNESS)
     start = NOW - int(weeks * WEEK_MS)
     ctx.repos.equity.upsert(
@@ -159,17 +181,39 @@ def _seed_p1(ctx: Context, *, weeks: float = 9.0, rebalances: int = 40,
         day = _day(start + i * DAY_MS)
         ctx.repos.rebalances.create(rid, day, start + i * DAY_MS)
         ctx.repos.rebalances.finish(
-            rid, ended_ts=start + i * DAY_MS + 600_000, status="complete",
-            completion_pct=completion, traded_notional=1000.0, fees=1.0,
-            avg_slippage_bps=1.0, maker_ratio=0.7, residuals=[],
+            rid,
+            ended_ts=start + i * DAY_MS + 600_000,
+            status="complete",
+            completion_pct=completion,
+            traded_notional=1000.0,
+            fees=1.0,
+            avg_slippage_bps=1.0,
+            maker_ratio=0.7,
+            residuals=[],
         )
-    ctx.repos.metrics.save_many([
-        MetricValue(Strategy.TREND, "maker_ratio", "since_inception", 0.71, NOW, n_obs=100),
-        MetricValue(Strategy.TREND, "execution_alpha", "since_inception", 10.0, NOW, n_obs=100,
-                    extra={"model_bps": 6.0, "realised_bps": 3.2}),
-    ])
-    ctx.repos.tracking.upsert(_day(NOW), corr_30d=0.8, cum_diff_frac=0.01, cost_ratio=1.2,
-                              turnover_ratio=1.1, in_bounds=True, breach_days=0)
+    ctx.repos.metrics.save_many(
+        [
+            MetricValue(Strategy.TREND, "maker_ratio", "since_inception", 0.71, NOW, n_obs=100),
+            MetricValue(
+                Strategy.TREND,
+                "execution_alpha",
+                "since_inception",
+                10.0,
+                NOW,
+                n_obs=100,
+                extra={"model_bps": 6.0, "realised_bps": 3.2},
+            ),
+        ]
+    )
+    ctx.repos.tracking.upsert(
+        _day(NOW),
+        corr_30d=0.8,
+        cum_diff_frac=0.01,
+        cost_ratio=1.2,
+        turnover_ratio=1.1,
+        in_bounds=True,
+        breach_days=0,
+    )
     for i in range(1000):
         ok = not (uptime_gap and i < 20)
         ctx.repos.heartbeats.add(start + i * 300_000, ok, "")
@@ -191,9 +235,17 @@ def test_section7_p1_passes_with_eight_weeks_of_clean_paper(ctx: Context) -> Non
 def test_section7_p1_requires_p0_to_have_passed(ctx: Context) -> None:
     _seed_p1(ctx)
     ctx.repos.backtest.save_run(
-        "run-1", created_ts=NOW, start_day="2021-01-01", end_day="2026-09-01", variant="default",
-        params={}, manifest={}, git_commit="abc",
-        metrics={"p0_evidence": {**PASSING_P0, "sharpe": 0.1}}, equity=[], duration_s=1.0,
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day="2026-09-01",
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={"p0_evidence": {**PASSING_P0, "sharpe": 0.1}},
+        equity=[],
+        duration_s=1.0,
     )
 
     assert "p0_passed" in PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW).failing()
@@ -244,10 +296,19 @@ def test_section7_p1_fails_on_any_reconciliation_break(ctx: Context) -> None:
 
 def test_section7_p1_fails_when_realised_slippage_exceeds_the_model(ctx: Context) -> None:
     _seed_p1(ctx)
-    ctx.repos.metrics.save_many([
-        MetricValue(Strategy.TREND, "execution_alpha", "since_inception", -5.0, NOW + 1,
-                    n_obs=100, extra={"model_bps": 6.0, "realised_bps": 9.0}),
-    ])
+    ctx.repos.metrics.save_many(
+        [
+            MetricValue(
+                Strategy.TREND,
+                "execution_alpha",
+                "since_inception",
+                -5.0,
+                NOW + 1,
+                n_obs=100,
+                extra={"model_bps": 6.0, "realised_bps": 9.0},
+            ),
+        ]
+    )
 
     named = _criteria(PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW))
 
@@ -257,8 +318,15 @@ def test_section7_p1_fails_when_realised_slippage_exceeds_the_model(ctx: Context
 
 def test_section7_p1_fails_when_tracking_is_out_of_bounds(ctx: Context) -> None:
     _seed_p1(ctx)
-    ctx.repos.tracking.upsert(_day(NOW), corr_30d=0.3, cum_diff_frac=0.09, cost_ratio=3.0,
-                              turnover_ratio=2.0, in_bounds=False, breach_days=15)
+    ctx.repos.tracking.upsert(
+        _day(NOW),
+        corr_30d=0.3,
+        cum_diff_frac=0.09,
+        cost_ratio=3.0,
+        turnover_ratio=2.0,
+        in_bounds=False,
+        breach_days=15,
+    )
 
     assert "tracking_in_bounds" in PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW).failing()
 
@@ -277,14 +345,12 @@ def test_section7_p2_needs_the_operator_approval_and_the_demo_checklist(ctx: Con
     assert named["operator_approval"]["actual"] is None
     assert named["demo_checklist_passed"]["actual"] is None
 
-    gates.approve(Phase.P2_MICRO_LIVE, "alice", "demo run clean", 1500.0, NOW,
-                  demo_checklist=False)
+    gates.approve(Phase.P2_MICRO_LIVE, "alice", "demo run clean", 1500.0, NOW, demo_checklist=False)
     named = _criteria(gates.evaluate(Phase.P2_MICRO_LIVE, NOW))
     assert named["operator_approval"]["passed"] is True
     assert named["demo_checklist_passed"]["passed"] is False
 
-    gates.approve(Phase.P2_MICRO_LIVE, "alice", "checklist re-run", 1500.0, NOW + 1,
-                  demo_checklist=True)
+    gates.approve(Phase.P2_MICRO_LIVE, "alice", "checklist re-run", 1500.0, NOW + 1, demo_checklist=True)
     assert gates.evaluate(Phase.P2_MICRO_LIVE, NOW + 1).passed is True
 
 
@@ -292,11 +358,20 @@ def test_section7_p3_counts_twelve_weeks_from_the_p2_approval(ctx: Context) -> N
     gates = PhaseGates(ctx)
     entered = NOW - 11 * WEEK_MS
     gates.approve(Phase.P2_MICRO_LIVE, "alice", "go", 1500.0, entered, demo_checklist=True)
-    ctx.repos.tracking.upsert(_day(NOW), corr_30d=0.8, cum_diff_frac=0.01, cost_ratio=1.2,
-                              turnover_ratio=1.1, in_bounds=True, breach_days=0)
-    ctx.repos.metrics.save_many([
-        MetricValue(Strategy.TREND, "vol_ratio", "30d", 0.9, NOW, n_obs=30),
-    ])
+    ctx.repos.tracking.upsert(
+        _day(NOW),
+        corr_30d=0.8,
+        cum_diff_frac=0.01,
+        cost_ratio=1.2,
+        turnover_ratio=1.1,
+        in_bounds=True,
+        breach_days=0,
+    )
+    ctx.repos.metrics.save_many(
+        [
+            MetricValue(Strategy.TREND, "vol_ratio", "30d", 0.9, NOW, n_obs=30),
+        ]
+    )
     gates.approve(Phase.P3_SCALED, "alice", "scale to 5k", 5000.0, NOW)
 
     named = _criteria(gates.evaluate(Phase.P3_SCALED, NOW))
@@ -311,8 +386,15 @@ def test_section7_p3_fails_when_a_kill_rule_fired_since_p2(ctx: Context) -> None
     entered = NOW - 13 * WEEK_MS
     gates.approve(Phase.P2_MICRO_LIVE, "alice", "go", 1500.0, entered, demo_checklist=True)
     gates.approve(Phase.P3_SCALED, "alice", "scale", 5000.0, NOW)
-    ctx.repos.tracking.upsert(_day(NOW), corr_30d=0.8, cum_diff_frac=0.01, cost_ratio=1.2,
-                              turnover_ratio=1.1, in_bounds=True, breach_days=0)
+    ctx.repos.tracking.upsert(
+        _day(NOW),
+        corr_30d=0.8,
+        cum_diff_frac=0.01,
+        cost_ratio=1.2,
+        turnover_ratio=1.1,
+        in_bounds=True,
+        breach_days=0,
+    )
     ctx.repos.metrics.save_many([MetricValue(Strategy.TREND, "vol_ratio", "30d", 1.0, NOW)])
     assert gates.evaluate(Phase.P3_SCALED, NOW).passed is True
 
@@ -339,8 +421,15 @@ def test_section7_p3_fails_when_realised_vol_leaves_the_half_to_one_and_a_half_b
 def test_section7_p3_fails_when_the_fee_ratio_doubles_the_backtest(ctx: Context) -> None:
     gates = PhaseGates(ctx)
     gates.approve(Phase.P2_MICRO_LIVE, "a", "go", 1500.0, NOW - 13 * WEEK_MS, demo_checklist=True)
-    ctx.repos.tracking.upsert(_day(NOW), corr_30d=0.8, cum_diff_frac=0.01, cost_ratio=2.5,
-                              turnover_ratio=1.1, in_bounds=True, breach_days=0)
+    ctx.repos.tracking.upsert(
+        _day(NOW),
+        corr_30d=0.8,
+        cum_diff_frac=0.01,
+        cost_ratio=2.5,
+        turnover_ratio=1.1,
+        in_bounds=True,
+        breach_days=0,
+    )
 
     assert "fee_ratio" in gates.evaluate(Phase.P3_SCALED, NOW).failing()
 

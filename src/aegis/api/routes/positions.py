@@ -204,8 +204,12 @@ def positions(
         margin=margin,
         governor_history=[
             GovernorRow(
-                ts=int(r["ts"]), dd=float(r["dd"]), g_before=float(r["g_before"]),
-                g_after=float(r["g_after"]), trigger=str(r["trigger"]), applied=bool(r["applied"]),
+                ts=int(r["ts"]),
+                dd=float(r["dd"]),
+                g_before=float(r["g_before"]),
+                g_after=float(r["g_after"]),
+                trigger=str(r["trigger"]),
+                applied=bool(r["applied"]),
             )
             for r in repos.governor.history(governor_limit)
         ],

@@ -277,6 +277,7 @@ class TrendRunner:
         if self.machine.can(EngineState.RISK_ACTION):
             self.machine.to(EngineState.RISK_ACTION, risk_reason=reason)
         self.executor.reduce_by(fractions, reason, now_ms)
+        self.snapshots.take(self.ctx.clock.now_ms())
         report.note(f"risk_cut:{reason}:{len(fractions)}")
         if self.machine.state.state is EngineState.RISK_ACTION:
             self.machine.to(EngineState.IDLE if previous is EngineState.REBALANCING else previous)
@@ -452,6 +453,11 @@ class TrendRunner:
             end_ts_ms=self._window_end_ms(now_ms),
         )
         report.note(f"rebalance:{outcome.status}:{outcome.completion_pct:.0f}%")
+        # Record what we now hold rather than waiting for the accounting cycle.
+        # The dashboard reads stored data only, so without this it shows the
+        # pre-rebalance book for minutes after the trades — and the drift monitor
+        # would compare the new targets against a stale position.
+        self.snapshots.take(self.ctx.clock.now_ms())
         self.machine.to(EngineState.IDLE)
 
     # ------------------------------------------------------------------ #

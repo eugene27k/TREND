@@ -190,7 +190,9 @@ def overview(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Ov
     components = repos.symbol_pnl.components(DAY_MIN, DAY_MAX)
     w30 = window_for("30d", now_ms, first_equity_day(repos))
     net_30d = repos.symbol_pnl.components(w30.start_day, w30.end_day)["net_pnl"]
-    by_side = [SidePnl(side=k, net_pnl=v) for k, v in sorted(repos.symbol_pnl.by_side(DAY_MIN, DAY_MAX).items())]
+    by_side = [
+        SidePnl(side=k, net_pnl=v) for k, v in sorted(repos.symbol_pnl.by_side(DAY_MIN, DAY_MAX).items())
+    ]
 
     snap = repos.snapshots.latest()
     equity = latest_equity(repos)
@@ -222,9 +224,7 @@ def overview(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Ov
         risk_status=str(risk_status(cfg, margin_ratio, state)),
         paused=state["paused"],
         blocks=state["blocks"],
-        below_min_active_days=bool(
-            metrics.extra("sharpe", "since_inception").get("below_min_active", True)
-        ),
+        below_min_active_days=bool(metrics.extra("sharpe", "since_inception").get("below_min_active", True)),
     )
     return OverviewResponse(
         strategy=str(sleeve.strategy),

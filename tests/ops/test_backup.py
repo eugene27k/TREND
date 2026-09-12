@@ -30,15 +30,22 @@ def bctx(tmp_path: Path, gateway) -> Context:
     clock = FakeClock(NOW)
     cfg = load_config(
         "config/trend.yaml",
-        {"backup": {"enabled": True, "litestream_replica_path": str(tmp_path / "replica")},
-         "storage": {"db_path": str(tmp_path / "trend.db")}},
+        {
+            "backup": {"enabled": True, "litestream_replica_path": str(tmp_path / "replica")},
+            "storage": {"db_path": str(tmp_path / "trend.db")},
+        },
         use_env=False,
     )
     db = open_db(tmp_path / "trend.db")
     repos = Repositories(db, Strategy.TREND)
     repos.state.log_control("start", "alice", "seed a row", {}, NOW)
-    yield Context(cfg=cfg, clock=clock, gateway=gateway, repos=repos,
-                  alerts=AlertBus(repos.alerts, clock, Strategy.TREND))
+    yield Context(
+        cfg=cfg,
+        clock=clock,
+        gateway=gateway,
+        repos=repos,
+        alerts=AlertBus(repos.alerts, clock, Strategy.TREND),
+    )
     db.close()
 
 
@@ -237,16 +244,15 @@ def test_litestream_restore_reports_a_non_zero_exit_as_failure(
 
     monkeypatch.setattr(backup_module, "litestream_available", lambda: True)
     monkeypatch.setattr(
-        backup_module.subprocess, "run",
+        backup_module.subprocess,
+        "run",
         lambda args, **kw: subprocess.CompletedProcess(args, 1),
     )
 
     assert litestream_restore(tmp_path / "replica", tmp_path / "out.db") is False
 
 
-def test_litestream_restore_swallows_an_os_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_litestream_restore_swallows_an_os_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(backup_module, "litestream_available", lambda: True)
 
     def explode(args, **kwargs):
