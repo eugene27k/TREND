@@ -1435,6 +1435,19 @@ class StateRepo(_Repo):
             "SELECT * FROM control_log WHERE strategy = ? ORDER BY ts DESC, id DESC LIMIT ?", (self.s, limit)
         )
 
+    def controls_after(self, after_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        """Rows queued since ``after_id``, oldest first — the engine's command inbox.
+
+        The API process may not touch ``engine_state``: it appends here and the
+        engine applies the action on its next tick. That keeps a single writer
+        for the engine's own state, and makes every operator action auditable by
+        construction rather than by convention.
+        """
+        return self.db.query(
+            "SELECT * FROM control_log WHERE strategy = ? AND id > ? ORDER BY id LIMIT ?",
+            (self.s, after_id, limit),
+        )
+
 
 class ApprovalRepo(_Repo):
     def add(
@@ -1493,6 +1506,12 @@ class HeartbeatRepo(_Repo):
         if not rows:
             return 0.0
         return 100.0 * sum(1 for r in rows if r["ok"]) / len(rows)
+
+    def last(self) -> dict[str, Any] | None:
+        """The most recent beat — "when did this process last say it was alive"."""
+        return self.db.query_one(
+            "SELECT * FROM heartbeats WHERE strategy = ? ORDER BY ts DESC LIMIT 1", (self.s,)
+        )
 
     def count(self, start_ms: int, end_ms: int) -> int:
         """Beats recorded in the window. Zero means "no evidence", not "0 % uptime"."""

@@ -32,8 +32,9 @@ from aegis.analytics.engine import MetricsEngine
 from aegis.bars.service import BarService
 from aegis.core.clock import at_utc, day_of, month_key
 from aegis.core.context import Context
-from aegis.core.errors import ExchangeUnreachable, GatewayError, RateLimited
+from aegis.core.errors import AegisError, ExchangeUnreachable, GatewayError, RateLimited
 from aegis.core.types import EngineState, Phase, Severity
+from aegis.ops.controls import Controls
 from aegis.portfolio.governor import governor, is_downward
 from aegis.portfolio.sizing import size_targets
 from aegis.rebalance.drift import DriftMonitor
@@ -41,7 +42,7 @@ from aegis.rebalance.executor import RebalanceExecutor
 from aegis.rebalance.planner import build_plan, minute_volume
 from aegis.riskmodel.estimators import build_risk_model
 from aegis.signals.engine import compute_signal
-from aegis.storage.db import json_dumps
+from aegis.storage.db import json_dumps, json_loads
 from aegis.strategy_trend import scheduler as sch
 from aegis.strategy_trend.kill_rules import KillRules
 from aegis.strategy_trend.machine import StateMachine
@@ -81,6 +82,7 @@ class TrendRunner:
         self.reconciler = Reconciler(ctx)
         self.attribution = Attribution(ctx)
         self.metrics = MetricsEngine(ctx)
+        self.controls = Controls(ctx)
         self.heartbeat = heartbeat
         self.reporter = reporter
         self._started = False
@@ -139,7 +141,13 @@ class TrendRunner:
         if not self._started:
             self.start(now_ms)
         report = TickReport(now_ms=now_ms, jobs=self.schedule.due(now_ms))
-        state = self.machine.state
+
+        # The API process appends operator actions to control_log and never
+        # touches engine_state, so the engine stays the single writer of its own
+        # state. Applying the queue first — and reloading afterwards — means a
+        # pause typed a second ago is respected by this very tick.
+        self._drain_controls(now_ms, report)
+        state = self.machine.load()
 
         if state.stopped:
             report.state = str(state.state)
@@ -165,6 +173,59 @@ class TrendRunner:
         report.state = str(self.machine.state.state)
         self.machine.state.context["last_tick"] = now_ms
         return report
+
+    # ------------------------------------------------------------------ #
+    # 0. The operator's inbox
+    # ------------------------------------------------------------------ #
+
+    def _drain_controls(self, now_ms: int, report: TickReport) -> None:
+        """Apply anything the dashboard queued since the last tick."""
+        context = self.machine.state.context
+        last_id = int(context.get("last_control_id", 0) or 0)
+        rows = self.ctx.repos.state.controls_after(last_id)
+        if not rows:
+            return
+        applied = last_id
+        for row in rows:
+            applied = max(applied, int(row["id"]))
+            payload = json_loads(row["payload_json"], {}) or {}
+            if payload.get("source") != "api":
+                continue  # the engine's own audit rows; applying them would loop
+            action = str(row["action"])
+            operator = str(row["operator"] or "api")
+            reason = str(row["reason"] or "")
+            confirm = str(payload.get("confirm", ""))
+            try:
+                self._apply_control(action, operator, reason, confirm, now_ms, report)
+            except AegisError as exc:
+                self.ctx.alerts.warn("CONTROL_REFUSED", f"{action}: {exc}",
+                                     {"action": action, "operator": operator})
+                report.note(f"control_refused:{action}")
+        self.machine.load()
+        self.machine.state.context["last_control_id"] = applied
+        self.machine.save()
+
+    def _apply_control(self, action: str, operator: str, reason: str, confirm: str,
+                       now_ms: int, report: TickReport) -> None:
+        if action == "start":
+            self.controls.start(operator, reason)
+        elif action == "pause":
+            self.controls.pause(operator, reason)
+        elif action == "resume":
+            self.controls.resume(operator, reason)
+        elif action == "stop":
+            self.controls.stop(operator, reason, confirm)
+        elif action == "clear_halt":
+            self.controls.clear_halt(operator, reason)
+        elif action == "flatten_all":
+            # The control records the request; flattening is an execution action
+            # and goes through the executor under the usual slicing rules.
+            self.controls.flatten_all(operator, reason, confirm)
+            if self.ctx.gateway.positions():
+                self.executor.flatten_all(f"operator:{operator}", now_ms)
+        else:
+            raise AegisError(f"unknown control action {action!r}")
+        report.note(f"control:{action}")
 
     # ------------------------------------------------------------------ #
     # 1. Risk — always, whatever else is happening

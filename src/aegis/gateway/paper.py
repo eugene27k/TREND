@@ -8,7 +8,7 @@ same arithmetic as every accounting test.
 
 The fill model is deliberately small enough to state in full:
 
-* **Post-only (GTX) and other resting limit orders.** They never take
+* **Post-only (GTX) and other passive limit orders.** They never take
   liquidity, so they fill only when the market comes to them. Each ``poll()``
   reads the book and fills the order *at its own limit price*, with
   ``is_maker=True`` and no slippage, once the opposite side of the book has
@@ -17,7 +17,11 @@ The fill model is deliberately small enough to state in full:
   market trades through fills the whole remaining quantity. This is optimistic
   about *whether* we get filled and pessimistic about nothing, which is why the
   phase gates measure the realised maker ratio against it (Section 7).
-* **IOC / FOK / MARKET.** They take liquidity, so they fill at placement time,
+  A reduce-only order stays pegged to the position it protects: its fill is
+  truncated to what is left to reduce and it is cancelled once there is nothing,
+  so a stale resting order can never open or flip a position (5.9 step 4).
+* **IOC / FOK / MARKET, and any limit priced through the touch.** They take
+  liquidity, so they fill at placement time,
   at ``aggressive_price(side)`` moved against us by the symbol's entry in the
   TREND slippage table (``cfg.exec.slippage_bps``: 2 bps for BTC/ETH, 6 bps
   otherwise — Locked Decision 8), with ``is_maker=False``.
@@ -57,6 +61,8 @@ from aegis.gateway.simulation import (
     OrderBookState,
     SimAccount,
     apply_fill_to_order,
+    crosses_book,
+    reduce_only_fill_qty,
     replace_order,
     validate_order,
 )
@@ -102,7 +108,7 @@ class PaperGateway:
         self.calls["exchange_info"] += 1
         if refresh or self._exchange_info is None:
             self._exchange_info = self.inner.exchange_info(refresh=refresh)
-        return self._exchange_info
+        return dict(self._exchange_info)
 
     def daily_bars(
         self, symbol: str, start: date | None = None, end: date | None = None, limit: int = 1500
@@ -199,6 +205,9 @@ class PaperGateway:
             book=book,
             reference_price=book.mid if book is not None else None,
         )
+        taker = self._is_taker(request, book)
+        if taker and book is None:
+            raise GatewayError(f"paper taker order on {request.symbol} needs a book")
         now = self.clock.now_ms()
         order_id = self.books.next_id()
         order = Order(
@@ -220,9 +229,7 @@ class PaperGateway:
             intent=request.intent,
         )
         self.books.add(order)
-        if self._is_taker(request):
-            if book is None:
-                raise GatewayError(f"paper taker order on {request.symbol} needs a book")
+        if taker and book is not None:  # a taker without a book was refused above
             self._fill(order, self.taker_price(request.symbol, request.side, book), is_maker=False)
         return self.books.get(order_id)
 
@@ -287,10 +294,22 @@ class PaperGateway:
         return base * (1.0 + edge) if side is Side.BUY else base * (1.0 - edge)
 
     @staticmethod
-    def _is_taker(request: OrderRequest) -> bool:
-        return request.order_type is OrderType.MARKET or request.time_in_force in (
+    def _is_taker(request: OrderRequest, book: BookTicker | None) -> bool:
+        """Only a passive limit can rest; everything else crosses at placement.
+
+        A limit priced through the touch is filled by the venue immediately, as
+        a taker — it must not be allowed to rest and then be reported as a maker
+        fill at its own (worse than market) price, because the maker ratio and
+        the realised slippage are P1 gate measurements (Section 7).
+        """
+        if request.order_type is OrderType.MARKET or request.time_in_force in (
             TimeInForce.IOC,
             TimeInForce.FOK,
+        ):
+            return True
+        # GTX never reaches here: validate_order rejects a crossing post-only.
+        return request.price is not None and book is not None and crosses_book(
+            request.side, request.price, book
         )
 
     def _poll_resting_orders(self) -> None:
@@ -305,8 +324,21 @@ class PaperGateway:
                 if order.side is Side.BUY
                 else book.bid_price > 0 and book.bid_price >= order.price
             )
-            if traded_through:
-                self._fill(order, order.price, is_maker=True)
+            if not traded_through:
+                continue
+            qty = order.remaining_qty
+            if order.reduce_only:
+                qty = reduce_only_fill_qty(self.sim.position_qty(order.symbol), order.side, qty)
+                if qty <= 0.0:
+                    # The position it was protecting is gone: the venue cancels
+                    # the order rather than letting it open one (5.9 step 4).
+                    self.books.add(
+                        replace_order(
+                            order, status=OrderStatus.CANCELED, updated_ts_ms=self.clock.now_ms()
+                        )
+                    )
+                    continue
+            self._fill(order, order.price, qty=qty, is_maker=True)
 
     def _poll_funding(self) -> None:
         for symbol, pos in list(self.sim.positions.items()):
@@ -322,8 +354,8 @@ class PaperGateway:
                 self._last_funding_ms[symbol] = settlement.funding_time_ms
                 last = settlement.funding_time_ms
 
-    def _fill(self, order: Order, price: float, *, is_maker: bool) -> Order:
-        qty = order.remaining_qty
+    def _fill(self, order: Order, price: float, *, is_maker: bool, qty: float | None = None) -> Order:
+        qty = order.remaining_qty if qty is None else qty
         now = self.clock.now_ms()
         opened_flat = self.sim.position_qty(order.symbol) == 0.0
         maker, taker = self.commission_rate(order.symbol)
@@ -341,8 +373,11 @@ class PaperGateway:
             slice_id=order.slice_id,
         )
         if opened_flat:
-            # Only settlements from here on belong to us.
-            self._last_funding_ms.setdefault(order.symbol, now)
+            # Only settlements from here on belong to us. This must overwrite an
+            # older watermark, not defer to it: settlements that fell while the
+            # book was flat are nobody's, and charging them to the new position
+            # would put funding in the ledger that the account never paid.
+            self._last_funding_ms[order.symbol] = now
         updated = apply_fill_to_order(order, qty, price, now)
         self.books.add(updated)
         return updated

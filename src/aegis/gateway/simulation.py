@@ -73,6 +73,22 @@ def reduce_only_is_valid(position_qty: float, side: Side, qty: float) -> bool:
     return qty <= abs(position_qty) + _GRID_TOL
 
 
+def reduce_only_fill_qty(position_qty: float, side: Side, qty: float) -> float:
+    """How much of a resting reduce-only order the venue would let fill *now*.
+
+    A reduce-only order stays pegged to the position it protects: the venue
+    truncates a fill to what is left to reduce and cancels the order once there
+    is nothing, so it can never open or flip a position (5.9 step 4). Returns
+    ``0.0`` when the order can no longer reduce anything.
+    """
+    if position_qty == 0.0:
+        return 0.0
+    signed = qty if side is Side.BUY else -qty
+    if (position_qty > 0) == (signed > 0):
+        return 0.0
+    return min(qty, abs(position_qty))
+
+
 def crosses_book(side: Side, price: float, book: BookTicker) -> bool:
     """True when a limit at ``price`` would take liquidity right now."""
     if side is Side.BUY:
@@ -493,6 +509,7 @@ __all__ = [
     "SimPosition",
     "apply_fill_to_order",
     "crosses_book",
+    "reduce_only_fill_qty",
     "reduce_only_is_valid",
     "replace_order",
     "validate_order",

@@ -324,12 +324,18 @@ class FakeGateway:
         self, symbol: str, start: date | None = None, end: date | None = None, limit: int = 1500
     ) -> list[DailyBar]:
         self._check("daily_bars")
+        if limit <= 0:
+            return []
         rows = [
             b
             for b in self._bars.get(symbol, [])
             if (start is None or b.day >= start) and (end is None or b.day <= end)
         ]
-        return rows[-limit:] if limit and len(rows) > limit else rows
+        # Same truncation as ``BinanceGateway``: paginating forward from a
+        # ``start`` keeps the oldest ``limit`` bars, an open-ended query the
+        # newest ones. A test double that truncates the other way would let a
+        # window bug pass here and fail live.
+        return rows[:limit] if start is not None else rows[-limit:]
 
     def book_ticker(self, symbol: str) -> BookTicker:
         self._check("book_ticker")

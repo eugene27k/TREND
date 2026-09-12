@@ -89,6 +89,11 @@ def signed_times(value: float | None, dp: int = 2) -> str:
     return NA if value is None else f"{signed(value, dp)}{TIMES}"
 
 
+def unit(text: str, suffix: str) -> str:
+    """``"1.4" -> "1.4 bps"``, but ``n/a`` stays ``n/a`` — a unitless absence."""
+    return text if text == NA else f"{text} {suffix}"
+
+
 def g_text(value: float | None) -> str:
     """``1.0``, ``0.5``, ``0.25`` — the governor's own vocabulary."""
     if value is None:
@@ -155,7 +160,7 @@ class Reporter:
         dd = None if row is None else _float(row["drawdown"])
         gov = self.ctx.repos.governor.last_before(end_ms - 1)
         g = _float(gov["g_after"]) if gov else 1.0
-        head = NA if equity is None else f"{num(equity)} USDT"
+        head = unit(num(equity), "USDT")
         change = (
             NA
             if day_change is None and since is None
@@ -227,12 +232,12 @@ class Reporter:
         minutes = None
         if row["ended_ts"] and row["started_ts"]:
             minutes = (int(row["ended_ts"]) - int(row["started_ts"])) / 60_000.0
-        duration = NA if minutes is None else f"{num(minutes, 0)} min"
+        duration = unit(num(minutes, 0), "min")
         return (
             f"Rebalance {pct(_float(row['completion_pct']), 0, scale=1.0)} in {duration}"
             f"{SEP}maker {pct(_float(row['maker_ratio']), 0)}"
-            f"{SEP}slippage {num(_float(row['avg_slippage_bps']), 1)} bps"
-            f"{SEP}traded {num(_float(row['traded_notional']), 0)} USDT"
+            f"{SEP}slippage {unit(num(_float(row['avg_slippage_bps']), 1), 'bps')}"
+            f"{SEP}traded {unit(num(_float(row['traded_notional']), 0), 'USDT')}"
         )
 
     def _risk_line(self, snapshot: Mapping[str, Any] | None, equity: float | None) -> str:
@@ -293,8 +298,8 @@ class Reporter:
                 bnb = _float(json_loads(last["context_json"], {}).get("days"))
         return (
             f"Heartbeat {pct(uptime, 0, scale=1.0)}{SEP}reconciliation {recon_text}"
-            f"{SEP}backup lag {NA if lag is None else f'{num(lag, 0)} s'}"
-            f"{SEP}BNB fees {NA if bnb is None else f'{num(bnb, 0)} d'}"
+            f"{SEP}backup lag {unit(num(lag, 0), 's')}"
+            f"{SEP}BNB fees {unit(num(bnb, 0), 'd')}"
         )
 
     def _housekeeping_line(self, day: date) -> str:
@@ -341,7 +346,8 @@ class Reporter:
             f"{SEP}{pct(_float(row['completion_pct']), 0, scale=1.0)}"
             f"{SEP}{orders} orders{SEP}{escalated} escalated{SEP}residual {len(residuals)}",
             f"Largest deltas: {self._largest_deltas(rebalance_id)}",
-            f"Fees {num(_float(row['fees']))}{SEP}slippage {num(_float(row['avg_slippage_bps']), 1)} bps"
+            f"Fees {num(_float(row['fees']))}"
+            f"{SEP}slippage {unit(num(_float(row['avg_slippage_bps']), 1), 'bps')}"
             f"{SEP}maker {pct(_float(row['maker_ratio']), 0)}",
         ]
         body = "\n".join(lines)
@@ -386,7 +392,7 @@ class Reporter:
 
         header = f"{self.prefix}{SEP}{kind}{SEP}{key} ({start.isoformat()} {ARROW} {end.isoformat()})"
         equity_line = (
-            f"Equity {NA if equity is None else f'{num(equity)} USDT'}"
+            f"Equity {unit(num(equity), 'USDT')}"
             f"{SEP}net {NA if parts is None else signed(parts['net_pnl'])}"
             f"{SEP}DD from peak {pct(dd)}{SEP}g = {g_text(repos.governor.current_g())}"
         )
@@ -410,7 +416,7 @@ class Reporter:
             [
                 f"Execution completion {pct(self._metric('rebalance_completion', period)[0], 0, scale=1.0)}",
                 f"maker {pct(self._metric('maker_ratio', period)[0], 0)}",
-                f"cost {num(self._metric('cost_per_unit_bps', period)[0], 1)} bps",
+                f"cost {unit(num(self._metric('cost_per_unit_bps', period)[0], 1), 'bps')}",
                 f"rebalances {len(rebalances)}",
             ]
         )
