@@ -38,6 +38,9 @@ from aegis.core.types import SignalResult
 
 _NAN = float("nan")
 
+#: A rolling std at or below this fraction of the window's magnitude is treated as flat.
+_FLAT_REL_EPS = 1e-12
+
 
 def response(z: float, norm: float = 0.89) -> float:
     """Blow-off-protected response ``z * exp(-z^2 / 4) / norm`` (Section 5.3).
@@ -68,7 +71,12 @@ def rolling_std(values: Sequence[float] | np.ndarray, window: int, ddof: int = 1
     for i in range(window - 1, arr.shape[0]):
         w = arr[i - window + 1 : i + 1]
         mean = float(np.sum(w)) / window
-        out[i] = math.sqrt(float(np.sum((w - mean) ** 2)) / denom)
+        sd = math.sqrt(float(np.sum((w - mean) ** 2)) / denom)
+        # A window of identical prices need not give *exactly* zero: rounding in the
+        # mean leaves a ~1e-14 residue, which would divide into a huge y and size a
+        # position out of float noise. Anything at that level is flat by definition.
+        scale = float(np.max(np.abs(w)))
+        out[i] = 0.0 if sd <= _FLAT_REL_EPS * scale else sd
     return out
 
 
