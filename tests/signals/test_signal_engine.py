@@ -33,7 +33,7 @@ def c1_config(**overrides: object) -> SignalConfig:
     return SignalConfig(**{**C1_PARAMS, **overrides})
 
 
-def trending_prices(n: int = 500, mu: float = 0.003, sd: float = 0.02, seed: int = 5) -> list[float]:
+def trending_prices(n: int = 400, mu: float = 0.003, sd: float = 0.02, seed: int = 5) -> list[float]:
     rng = np.random.default_rng(seed)
     return list(100.0 * np.exp(np.cumsum(mu + rng.normal(0.0, sd, n))))
 
@@ -202,11 +202,11 @@ def test_us_t04_ac2_ema_is_seeded_at_the_first_observation() -> None:
     prices = [100.0, 110.0, 90.0]
     cfg = SignalConfig(pairs=((2, 3),), price_std_window=2, y_std_window=2)
     short_alpha, long_alpha = 2.0 / 3.0, 2.0 / 4.0
-    s = l = 100.0
+    fast = slow = 100.0
     for p in prices[1:]:
-        s += short_alpha * (p - s)
-        l += long_alpha * (p - l)
-    assert compute_signal(prices, cfg).x[0] == pytest.approx(s - l, abs=1e-12)
+        fast += short_alpha * (p - fast)
+        slow += long_alpha * (p - slow)
+    assert compute_signal(prices, cfg).x[0] == pytest.approx(fast - slow, abs=1e-12)
 
 
 def test_us_t04_ac2_rolling_std_is_a_sample_std_with_ddof_one() -> None:
@@ -215,7 +215,8 @@ def test_us_t04_ac2_rolling_std_is_a_sample_std_with_ddof_one() -> None:
     assert math.isnan(out[0]) and math.isnan(out[1])
     assert out[2] == pytest.approx(1.0)  # ddof=1 over (1,2,3)
     assert rolling_std(values, 3, ddof=0)[2] == pytest.approx(math.sqrt(2.0 / 3.0))
-    assert np.isnan(rolling_std(values, 5)).all()
+    assert np.isnan(rolling_std(values, 5)).all()  # window longer than the history
+    assert np.isnan(rolling_std(values, 1)).all()  # a one-observation sample std is undefined
 
 
 # --------------------------------------------------------------------------- #
@@ -247,8 +248,8 @@ def test_us_t04_ac3_constant_prices_give_zero_signal_not_infinity() -> None:
 
 
 def test_us_t04_ac3_flat_tail_after_a_trend_is_not_warm() -> None:
-    prices = trending_prices(300) + [0.0] * 80
-    prices[300:] = [prices[299]] * 80
+    trend = trending_prices(300)
+    prices = trend + [trend[-1]] * 80
     result = compute_signal(prices, _prod_like())
     assert not result.warm
     assert result.signal == 0.0
@@ -290,6 +291,10 @@ def test_us_t04_ac2_invalid_config_raises_config_error(overrides: dict[str, obje
 def test_us_t04_ac2_empty_pairs_and_bad_norm_raise_config_error() -> None:
     with pytest.raises(ConfigError):
         compute_signal(C1_PRICES, c1_config(pairs=()))
+    # model_construct bypasses pydantic, so the engine's own guard is the one under test.
+    unvalidated = SignalConfig.model_construct(**{**C1_PARAMS, "response_norm": 0.0, "ddof": 1})
+    with pytest.raises(ConfigError):
+        compute_signal(C1_PRICES, unvalidated)
     with pytest.raises(ConfigError):
         response(1.0, norm=0.0)
     with pytest.raises(ConfigError):
