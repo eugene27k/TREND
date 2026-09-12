@@ -39,6 +39,14 @@ export function ts(ms: number | null | undefined): string {
   return new Date(ms).toISOString().replace('T', ' ').slice(0, 19)
 }
 
+/** Buy/long is green, sell/short is red, anything else stays neutral. */
+export function sideCls(side: string | null | undefined): string {
+  const s = (side ?? '').toLowerCase()
+  if (s === 'buy' || s === 'long') return 'up'
+  if (s === 'sell' || s === 'short') return 'down'
+  return 'muted'
+}
+
 /** PRD Section 10.5: a metric with too few observations is shown greyed, not hidden. */
 export function isStale(nObs: number, min = 20): boolean {
   return nObs < min

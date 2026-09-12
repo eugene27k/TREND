@@ -96,3 +96,18 @@ def world():
     )
     yield ctx
     db.close()
+
+
+@pytest.fixture
+def runner_after_a_day(world):
+    """A context whose engine has completed one real trading day."""
+    from aegis.core.clock import to_ms as _to_ms
+    from aegis.strategy_trend.runner import TrendRunner
+
+    runner = TrendRunner(world)
+    runner.start(world.clock.now_ms())
+    world.clock.set(_to_ms("2026-09-08T00:02:00Z"))
+    runner.tick(world.clock.now_ms())
+    world.clock.set(_to_ms("2026-09-08T00:05:00Z"))
+    runner.tick(world.clock.now_ms())
+    return world, TODAY

@@ -32,7 +32,7 @@ services:
     volumes:
       - trend-data:/app/data
       - ./config:/app/config:ro
-    mem_limit: 640m
+    mem_limit: 448m
     cpus: 0.8
 
   carry:
@@ -56,7 +56,7 @@ services:
     volumes:
       - carry-data:/app/data
       - ./config:/app/config:ro
-    mem_limit: 384m
+    mem_limit: 320m
     cpus: 0.8
 
   dashboard:
@@ -69,13 +69,14 @@ services:
     entrypoint: ["python", "-m", "uvicorn", "aegis.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       AEGIS_API__TREND_DB: /app/data/trend.db
-      AEGIS_API__CARRY_DB: /app/data/carry.db
+      AEGIS_API__CARRY_DB: /app/carry-data/carry.db
     ports:
       - "127.0.0.1:8000:8000"    # behind the host firewall; tunnel to reach it
     volumes:
+      # Read-only: the dashboard never writes to an engine's database.
       - trend-data:/app/data:ro
-      - carry-data:/app/data/carry:ro
-    mem_limit: 256m
+      - carry-data:/app/carry-data:ro
+    mem_limit: 192m
     cpus: 0.3
 
 volumes:

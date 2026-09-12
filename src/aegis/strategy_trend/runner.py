@@ -198,15 +198,17 @@ class TrendRunner:
             try:
                 self._apply_control(action, operator, reason, confirm, now_ms, report)
             except AegisError as exc:
-                self.ctx.alerts.warn("CONTROL_REFUSED", f"{action}: {exc}",
-                                     {"action": action, "operator": operator})
+                self.ctx.alerts.warn(
+                    "CONTROL_REFUSED", f"{action}: {exc}", {"action": action, "operator": operator}
+                )
                 report.note(f"control_refused:{action}")
         self.machine.load()
         self.machine.state.context["last_control_id"] = applied
         self.machine.save()
 
-    def _apply_control(self, action: str, operator: str, reason: str, confirm: str,
-                       now_ms: int, report: TickReport) -> None:
+    def _apply_control(
+        self, action: str, operator: str, reason: str, confirm: str, now_ms: int, report: TickReport
+    ) -> None:
         if action == "start":
             self.controls.start(operator, reason)
         elif action == "pause":

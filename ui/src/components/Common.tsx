@@ -17,9 +17,22 @@ export function Panel({ title, children, right }: { title?: string; children: Re
   )
 }
 
-export function Tile({ label, value, sub, tone }: { label: string; value: ReactNode; sub?: ReactNode; tone?: string }) {
+export function Tile({
+  label,
+  value,
+  sub,
+  tone,
+  stale,
+}: {
+  label: string
+  value: ReactNode
+  sub?: ReactNode
+  tone?: string
+  /** PRD Section 10.5: too few observations greys the tile, it never hides it. */
+  stale?: boolean
+}) {
   return (
-    <div className="panel tile">
+    <div className={`panel tile${stale ? ' stale' : ''}`}>
       <div className="label">{label}</div>
       <div className={`value ${tone ?? ''}`}>{value}</div>
       {sub !== undefined && <div className="sub">{sub}</div>}
@@ -36,6 +49,36 @@ export function StatusPill({ status }: { status: string }) {
 export function Empty({ what }: { what: string }) {
   return <div className="empty">No {what} yet.</div>
 }
+
+/** A labelled bar, used for cap utilisation and any other 0-1 fraction. */
+export function Meter({ label, right, frac, breached }: { label: ReactNode; right?: ReactNode; frac: number; breached?: boolean }) {
+  const f = Number.isFinite(frac) ? Math.max(0, Math.min(1, frac)) : 0
+  const tone = breached || f >= 1 ? 'var(--down)' : f >= 0.8 ? 'var(--warn)' : 'var(--up)'
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', fontSize: 12, marginBottom: 4 }}>
+        <span className="muted">{label}</span>
+        <span style={{ flex: 1 }} />
+        <span>{right}</span>
+      </div>
+      <div style={{ height: 6, background: 'var(--panel-2)', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ width: `${f * 100}%`, height: '100%', background: tone }} />
+      </div>
+    </div>
+  )
+}
+
+/** Chart chrome shared by every recharts panel, so the dark theme stays in one place. */
+export const AXIS = { stroke: '#8b97a6', fontSize: 11 } as const
+export const GRID = { stroke: '#2a323d' } as const
+export const TIP = { background: '#161b22', border: '1px solid #2a323d', borderRadius: 8, fontSize: 12 } as const
+export const COLORS = {
+  accent: '#58a6ff',
+  up: '#3fb950',
+  down: '#f85149',
+  warn: '#d29922',
+  muted: '#8b97a6',
+} as const
 
 /** Load once per dependency change, with the request cancelled on unmount. */
 export function useApi<T>(fn: (signal: AbortSignal) => Promise<T>, deps: unknown[]) {

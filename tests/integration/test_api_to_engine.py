@@ -53,8 +53,13 @@ def wired(tmp_path):
     gateway = build_world(clock)
     db = open_db(db_path)
     repos = Repositories(db, Strategy.TREND)
-    ctx = Context(cfg=cfg, clock=clock, gateway=gateway, repos=repos,
-                  alerts=AlertBus(repos.alerts, clock, Strategy.TREND))
+    ctx = Context(
+        cfg=cfg,
+        clock=clock,
+        gateway=gateway,
+        repos=repos,
+        alerts=AlertBus(repos.alerts, clock, Strategy.TREND),
+    )
 
     runner = TrendRunner(ctx)
     runner.start(clock.now_ms())
@@ -136,9 +141,18 @@ def test_every_page_answers_on_an_empty_database(tmp_path):
     db_path = tmp_path / "empty.db"
     open_db(db_path).close()
     client = TestClient(create_app({"TREND": write_config(tmp_path, db_path)}))
-    for path in ("/api/strategies", "/api/overview", "/api/TREND/overview",
-                 "/api/TREND/signals", "/api/TREND/positions", "/api/TREND/rebalances",
-                 "/api/TREND/attribution", "/api/TREND/metrics", "/api/TREND/operations",
-                 "/api/TREND/backtest", "/api/TREND/universe"):
+    for path in (
+        "/api/strategies",
+        "/api/overview",
+        "/api/TREND/overview",
+        "/api/TREND/signals",
+        "/api/TREND/positions",
+        "/api/TREND/rebalances",
+        "/api/TREND/attribution",
+        "/api/TREND/metrics",
+        "/api/TREND/operations",
+        "/api/TREND/backtest",
+        "/api/TREND/universe",
+    ):
         response = client.get(path)
         assert response.status_code == 200, f"{path} -> {response.status_code}"

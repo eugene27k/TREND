@@ -170,8 +170,16 @@ class MetricsEngine:
         days = sorted(d for d in returns_all if w.contains(d))
         returns = [returns_all[d] for d in days]
         active_days = sum(1 for r in returns if r != 0.0)
-        window_equity = [equity_by_day[d] for d in sorted(equity_by_day) if w.contains(d)]
+        window_days = [d for d in sorted(equity_by_day) if w.contains(d)]
+        window_equity = [equity_by_day[d] for d in window_days]
         window_index = [index_by_day[d] for d in sorted(index_by_day) if w.contains(d)]
+
+        # The days the sleeve actually existed inside the window. A `ytd` window
+        # opened on 1 January must not credit interest, charge hosting or
+        # annualise turnover over months in which there was no sleeve; when the
+        # curve starts at or before the window this is exactly ``w.days``.
+        live_start = window_days[0] if window_days else None
+        live_days = (w.end_day - live_start).days + 1 if live_start else w.days
 
         pnl_rows = repos.symbol_pnl.between(w.start_day, w.end_day)
         fills = repos.fills.between(w.start_ms, w.end_ms)
@@ -179,6 +187,7 @@ class MetricsEngine:
 
         ctx_extra = {
             "period_days": w.days,
+            "live_days": live_days,
             "active_days": active_days,
             "min_active_days": cfg.metrics.min_active_days,
             "below_min_active": active_days < cfg.metrics.min_active_days,
@@ -272,7 +281,7 @@ class MetricsEngine:
         # --- turnover and execution quality ----------------------------------
         traded = sum(abs(f.notional) for f in fills)
         avg_equity = m.mean(window_equity) or 0.0
-        period_turnover, annualised = tm.turnover(traded, avg_equity, w.days)
+        period_turnover, annualised = tm.turnover(traded, avg_equity, live_days)
         out.append(
             mv(
                 "turnover",
@@ -337,11 +346,22 @@ class MetricsEngine:
         )
         carry_returns = self._carry_returns()
         carry_days = [d for d in days if d in carry_returns]
+        carry_strategy = [returns_all[d] for d in carry_days]
+        carry_bench = [carry_returns[d] for d in carry_days]
+        # "Correlation with BTC / with CARRY ... same windows" (Section 10): the
+        # trailing window is the headline, the whole period rides along in extra,
+        # exactly as for corr_btc — otherwise the two halves of one dashboard row
+        # would be measured over different spans.
+        window_days_n = cfg.metrics.beta_window_days
         out.append(
             mv(
                 "corr_carry",
-                m.correlation([returns_all[d] for d in carry_days], [carry_returns[d] for d in carry_days]),
+                m.correlation(*_tail(carry_strategy, carry_bench, window_days_n)),
                 n_obs=len(carry_days),
+                extra={
+                    "window": window_days_n,
+                    "full_period": m.correlation(carry_strategy, carry_bench),
+                },
             )
         )
 
@@ -383,8 +403,9 @@ class MetricsEngine:
         out.append(mv("signal_strong_frac", sig["strong_frac"], n_obs=n_sig))
 
         # --- governor and regime -------------------------------------------------
-        gov_rows = self._governor_rows(w)
-        time_in_state = tm.governor_time_in_state(gov_rows, w.start_ms, w.end_ms)
+        gov_start_ms = day_start_ms(live_start) if live_start else w.start_ms
+        gov_rows = self._governor_rows(gov_start_ms, w.end_ms)
+        time_in_state = tm.governor_time_in_state(gov_rows, gov_start_ms, w.end_ms)
         out.append(mv("governor_time_g1", time_in_state["g1"], n_obs=len(gov_rows)))
         out.append(mv("governor_time_g05", time_in_state["g05"], n_obs=len(gov_rows)))
         out.append(
@@ -419,7 +440,7 @@ class MetricsEngine:
         out.append(
             mv(
                 "net_of_infra",
-                m.net_of_infra(net_pnl, cfg.infra.monthly_cost_eur, w.days),
+                m.net_of_infra(net_pnl, cfg.infra.monthly_cost_eur, live_days),
                 n_obs=len(pnl_rows),
                 extra={"net_pnl": net_pnl, "monthly_cost_eur": cfg.infra.monthly_cost_eur},
             )
@@ -428,7 +449,7 @@ class MetricsEngine:
         out.append(
             mv(
                 "cash_alternative",
-                m.cash_alternative(equity0, cfg.bench.rf_annual, w.days),
+                m.cash_alternative(equity0, cfg.bench.rf_annual, live_days),
                 n_obs=len(window_equity),
                 extra={"rf_annual": cfg.bench.rf_annual, "equity0": equity0},
             )
@@ -555,15 +576,22 @@ class MetricsEngine:
                 out[day] = float(row["ref_pnl"] or 0.0) / base
         return out
 
-    def _governor_rows(self, w: Window) -> list[dict[str, Any]]:
-        rows = self.ctx.repos.governor.between(w.start_ms, w.end_ms)
-        carried = self.ctx.repos.governor.last_before(w.start_ms)
+    def _governor_rows(self, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+        rows = self.ctx.repos.governor.between(start_ms, end_ms)
+        carried = self.ctx.repos.governor.last_before(start_ms)
         return [carried, *rows] if carried else rows
 
 
 # --------------------------------------------------------------------------- #
 # Row -> series helpers (module-level so they stay testable and obviously pure)
 # --------------------------------------------------------------------------- #
+
+
+def _tail(a: Sequence[float], b: Sequence[float], window: int | None) -> tuple[list[float], list[float]]:
+    """The most recent ``window`` observations of two aligned series."""
+    if window is not None and window > 0 and len(a) > window:
+        return list(a[-window:]), list(b[-window:])
+    return list(a), list(b)
 
 
 def _returns_by_day(equity_rows: Iterable[Mapping[str, Any]]) -> dict[date, float]:

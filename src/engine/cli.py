@@ -203,6 +203,18 @@ def cmd_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     from aegis.ops.reports import Reporter
     from aegis.strategy_trend.runner import TrendRunner
 
+    if cfg.strategy is not Strategy.TREND:
+        # The shared layer, the schema and the dashboard are strategy-agnostic and
+        # already carry CARRY's rows, but CARRY's own strategy modules belong to a
+        # different PRD and are not in this build. Running the TREND engine against
+        # a carry sub-account would trade the wrong strategy with real money, so
+        # this refuses rather than improvises.
+        raise ConfigError(
+            f"the {cfg.strategy} sleeve's strategy modules are not part of this build; "
+            "only --strategy trend can run. The shared layer and the dashboard do support "
+            f"{cfg.strategy} once its engine exists."
+        )
+
     ctx = build_context(cfg)
     try:
         for check in assert_safe_to_start(cfg, ctx.gateway, ctx.clock.now_ms()):

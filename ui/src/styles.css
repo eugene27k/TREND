@@ -62,6 +62,7 @@ tbody tr:hover { background: var(--panel-2); }
 .scroll { overflow: auto; max-height: 460px; }
 
 .up { color: var(--up); } .down { color: var(--down); } .muted { color: var(--muted); }
+.warn { color: var(--warn); }
 .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px;
   border: 1px solid var(--line); }
 .pill.green { color: var(--up); border-color: #2a5c33; }

@@ -18,8 +18,7 @@ BARS_AT = "2026-09-08T00:02:00Z"
 REBALANCE_AT = "2026-09-08T00:05:00Z"
 
 
-def queue(world, action: str, *, operator: str = "eugene", reason: str = "test",
-          confirm: str = "") -> None:
+def queue(world, action: str, *, operator: str = "eugene", reason: str = "test", confirm: str = "") -> None:
     """What the API's POST /controls endpoint does — and nothing more."""
     world.repos.state.log_control(
         action, operator, reason, {"source": "api", "confirm": confirm}, world.clock.now_ms()
@@ -48,7 +47,7 @@ def test_pause_blocks_the_rebalance(world, runner):
 def test_pause_does_not_block_a_risk_reduction(world, runner):
     """Section 7: 'Pause blocks rebalances but not risk actions'."""
     world.clock.set(to_ms(REBALANCE_AT))
-    runner.tick(world.clock.now_ms())            # take a book first
+    runner.tick(world.clock.now_ms())  # take a book first
     assert world.gateway.positions()
 
     queue(world, "pause")

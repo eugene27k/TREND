@@ -655,6 +655,16 @@ class BarRepo(_Repo):
             )
         )
 
+    def symbols(self) -> list[str]:
+        """Every symbol with stored bars — the reference run's instrument set."""
+        return [
+            r["symbol"]
+            for r in self.db.query(
+                "SELECT DISTINCT symbol FROM daily_bars WHERE strategy = ? ORDER BY symbol",
+                (self.s,),
+            )
+        ]
+
     def count(self, symbol: str) -> int:
         return int(
             self.db.scalar(
@@ -878,6 +888,22 @@ class RebalanceRepo(_Repo):
             "SELECT * FROM rebalances WHERE strategy = ? ORDER BY started_ts DESC LIMIT ?",
             (self.s, limit),
         )
+
+    def cost_summary(self, start: date | str, end: date | str) -> dict[str, float]:
+        """Traded notional and realised cost over a window — the tracking ratios' input."""
+        rows = self.db.query(
+            "SELECT COALESCE(SUM(traded_notional), 0) AS traded,"
+            " COALESCE(SUM(fees), 0) AS fees,"
+            " COALESCE(SUM(ABS(avg_slippage_bps) * traded_notional / 10000.0), 0) AS slippage"
+            " FROM rebalances WHERE strategy = ? AND day >= ? AND day <= ?",
+            (self.s, _day(start), _day(end)),
+        )
+        row = rows[0] if rows else {}
+        return {
+            "traded": float(row.get("traded") or 0.0),
+            "fees": float(row.get("fees") or 0.0),
+            "slippage": float(row.get("slippage") or 0.0),
+        }
 
     def for_day(self, day: date | str) -> list[dict[str, Any]]:
         return self.db.query(

@@ -28,11 +28,15 @@ const PAGES = [
   { path: 'controls', label: 'Controls' },
 ]
 
+const FALLBACK: Strategy = 'TREND'
+
 export function App() {
+  // GET /api/strategies returns StrategyInfo rows (strategy, mode, phase, db_path).
   const { data } = useApi((s) => api.strategies(s), [])
-  const available = data?.strategies ?? ['TREND']
-  const [strategy, setStrategy] = useState<Strategy>('TREND')
-  const active = available.includes(strategy) ? strategy : available[0]
+  const available = data?.strategies ?? []
+  const [strategy, setStrategy] = useState<Strategy | null>(null)
+  const info = available.find((s) => s.strategy === strategy) ?? available[0] ?? null
+  const active = info?.strategy ?? strategy ?? FALLBACK
 
   return (
     <div className="app">
@@ -51,9 +55,15 @@ export function App() {
       <main className="main">
         <div className="topbar">
           <h1>{active}</h1>
-          <select value={active} onChange={(e) => setStrategy(e.target.value as Strategy)}>
-            {available.map((s) => <option key={s} value={s}>{s}</option>)}
+          <select value={active} onChange={(e) => setStrategy(e.target.value)}>
+            {available.length === 0 && <option value={active}>{active}</option>}
+            {available.map((s) => <option key={s.strategy} value={s.strategy}>{s.strategy}</option>)}
           </select>
+          {info && (
+            <span className="muted">
+              {info.mode} · {info.phase}
+            </span>
+          )}
           <div className="spacer" />
         </div>
 
