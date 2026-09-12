@@ -14,10 +14,16 @@ E = 10_000.0
 def book(ctx):
     """A helper that puts a book on the venue and returns the supervisor."""
 
-    def _build(notionals: dict[str, float], *, equity: float = E, maint: float = 0.0,
-               adl: dict[str, int] | None = None):
-        ctx.gateway.set_account(wallet_balance=equity, margin_balance=equity,
-                                available_balance=equity, maint_margin=maint)
+    def _build(
+        notionals: dict[str, float],
+        *,
+        equity: float = E,
+        maint: float = 0.0,
+        adl: dict[str, int] | None = None,
+    ):
+        ctx.gateway.set_account(
+            wallet_balance=equity, margin_balance=equity, available_balance=equity, maint_margin=maint
+        )
         for symbol, notional in notionals.items():
             ctx.gateway.set_symbol_info(symbol)
             ctx.gateway.set_mark(symbol, 100.0)
@@ -50,23 +56,23 @@ def test_us_t12_ac1_amber_on_a_gross_cap_breach(book, ctx):
 
 
 def test_us_t12_ac1_amber_on_a_net_cap_breach(book, ctx):
-    sup = book({"BTCUSDT": 16_000.0})   # net 1.6x > 1.5x cap
+    sup = book({"BTCUSDT": 16_000.0})  # net 1.6x > 1.5x cap
     s = sup.check(ctx.clock.now_ms())
     assert "net" in s.breaches
     assert s.status is RiskStatus.AMBER
 
 
 def test_us_t12_ac1_amber_on_a_single_cap_breach(book, ctx):
-    sup = book({"BTCUSDT": 3_000.0})    # 0.30x > 0.25x cap
+    sup = book({"BTCUSDT": 3_000.0})  # 0.30x > 0.25x cap
     s = sup.check(ctx.clock.now_ms())
     assert s.breaches == ("single:BTCUSDT",)
 
 
 def test_us_t12_ac1_margin_bands(book, ctx):
-    sup = book({"BTCUSDT": 1_000.0}, maint=2_100.0)     # ratio 21 %
+    sup = book({"BTCUSDT": 1_000.0}, maint=2_100.0)  # ratio 21 %
     assert sup.check(ctx.clock.now_ms()).status is RiskStatus.AMBER
 
-    sup = book({"BTCUSDT": 1_000.0}, maint=3_600.0)     # ratio 36 %
+    sup = book({"BTCUSDT": 1_000.0}, maint=3_600.0)  # ratio 36 %
     s = sup.check(ctx.clock.now_ms())
     assert s.status is RiskStatus.RED
     assert any(a["code"] == "MARGIN_RED" for a in ctx.repos.alerts.recent())
@@ -110,7 +116,7 @@ def test_us_t12_ac3_survivable_move_shrinks_as_the_net_book_grows(book, ctx):
     small = sup.survivable_move({}, E)
     ctx.gateway.set_symbol_info("BTCUSDT")
     ctx.gateway.set_mark("BTCUSDT", 100.0)
-    ctx.gateway.set_position("BTCUSDT", qty=150.0, entry_price=100.0)   # net 1.5x
+    ctx.gateway.set_position("BTCUSDT", qty=150.0, entry_price=100.0)  # net 1.5x
     positions = ctx.gateway.positions()
     big = sup.survivable_move(positions, E)
     assert big < small
@@ -147,10 +153,8 @@ def test_us_t12_ac3_proposed_targets_that_breach_the_rule_are_refused(ctx):
     sup = RiskSupervisor(ctx)
     from aegis.core.types import SymbolTarget
 
-    breaching = Targets((SymbolTarget("BTCUSDT", 1.0, 0.5, 26_000.0, 26_000.0),),
-                        0.2, 1.0, 0.2, 1.0, 1.0, E)
-    safe = Targets((SymbolTarget("BTCUSDT", 1.0, 0.5, 2_000.0, 2_000.0),),
-                   0.2, 1.0, 0.2, 1.0, 1.0, E)
+    breaching = Targets((SymbolTarget("BTCUSDT", 1.0, 0.5, 26_000.0, 26_000.0),), 0.2, 1.0, 0.2, 1.0, 1.0, E)
+    safe = Targets((SymbolTarget("BTCUSDT", 1.0, 0.5, 2_000.0, 2_000.0),), 0.2, 1.0, 0.2, 1.0, 1.0, E)
     assert sup.would_breach_downtime_rule(breaching, E)
     assert not sup.would_breach_downtime_rule(safe, E)
 
@@ -170,8 +174,7 @@ def test_us_t12_ac4_short_at_adl_quantile_4_is_reduced_25_pct(book, ctx):
 
 
 def test_us_t12_ac4_longs_and_low_quantiles_are_left_alone(book, ctx):
-    sup = book({"BTCUSDT": 1_000.0, "ETHUSDT": -1_000.0},
-               adl={"BTCUSDT": 5, "ETHUSDT": 3})
+    sup = book({"BTCUSDT": 1_000.0, "ETHUSDT": -1_000.0}, adl={"BTCUSDT": 5, "ETHUSDT": 3})
     assert sup.adl_reductions(ctx.gateway.positions()) == []
 
 
@@ -181,10 +184,9 @@ def test_us_t12_ac5_bnb_balance_below_the_floor_alerts(book, ctx):
     sup = book({"BTCUSDT": 1_000.0})
     now = ctx.clock.now_ms()
     # 30 USDT of commission over 30 days = 1/day; 2 BNB-equivalent covers 2 days.
-    ctx.repos.ledger.add_many([
-        LedgerEntry(Strategy.TREND, now - 86_400_000, IncomeType.COMMISSION, "USDT", -30.0,
-                    "BTCUSDT", "t1")
-    ])
+    ctx.repos.ledger.add_many(
+        [LedgerEntry(Strategy.TREND, now - 86_400_000, IncomeType.COMMISSION, "USDT", -30.0, "BTCUSDT", "t1")]
+    )
     ctx.gateway.set_bnb_balance(2.0)
     days = sup.check_bnb_balance(now)
     assert days == pytest.approx(2.0)
@@ -230,9 +232,19 @@ def test_us_t12_ac2_gross_breach_scales_the_whole_book_proportionally(book, ctx)
 
 def test_us_t12_ac2_net_breach_scales_only_the_dominant_side(book, ctx):
     # net +16 000 = 1.6x on a 1.5x cap; gross 18 000 = 1.8x is inside 2.5x.
-    legs = {"AUSDT": 2_000.0, "BUSDT": 2_000.0, "CUSDT": 2_000.0, "DUSDT": 2_000.0,
-            "EUSDT": 2_000.0, "FUSDT": 2_000.0, "GUSDT": 2_000.0, "HUSDT": 2_000.0,
-            "IUSDT": 2_000.0, "JUSDT": -1_000.0, "KUSDT": -1_000.0}
+    legs = {
+        "AUSDT": 2_000.0,
+        "BUSDT": 2_000.0,
+        "CUSDT": 2_000.0,
+        "DUSDT": 2_000.0,
+        "EUSDT": 2_000.0,
+        "FUSDT": 2_000.0,
+        "GUSDT": 2_000.0,
+        "HUSDT": 2_000.0,
+        "IUSDT": 2_000.0,
+        "JUSDT": -1_000.0,
+        "KUSDT": -1_000.0,
+    }
     sup = book(legs)
     s = sup.check(ctx.clock.now_ms())
     assert "net" in s.breaches and "gross" not in s.breaches

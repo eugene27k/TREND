@@ -9,7 +9,7 @@ import pytest
 from aegis.backtest_trend.simulator import COV_WINDOW_DAYS, Simulator
 from aegis.backtest_trend.universe_builder import PointInTimeUniverse, months_between
 from aegis.core.clock import month_key
-from tests.backtest_trend.conftest import DAYS, START, make_market
+from tests.backtest_trend.conftest import DAYS, START
 
 WARM = START + timedelta(days=430)
 END = START + timedelta(days=DAYS - 1)
@@ -52,9 +52,9 @@ def test_us_t16_ac6_the_run_is_deterministic(bt_cfg, market):
 
 def test_us_t16_ac6_a_different_parameter_changes_the_run_id(bt_cfg, market):
     a = build(bt_cfg, market)
-    other = bt_cfg.model_copy(update={
-        "sizing": bt_cfg.sizing.model_copy(update={"sigma_target_asset": 0.30})
-    })
+    other = bt_cfg.model_copy(
+        update={"sizing": bt_cfg.sizing.model_copy(update={"sigma_target_asset": 0.30})}
+    )
     b = build(other, market)
     assert a.run(WARM, END).run_id != b.run(WARM, END).run_id
 
@@ -72,7 +72,6 @@ def test_us_t16_ac6_completes_well_inside_the_15_minute_budget(run):
 
 def test_equity_reconciles_with_cash_and_marked_positions(bt_cfg, market):
     """Section 14 point 2: the equity path must be recomputable from its own flows."""
-    bars, funding, _ = market
     sim = build(bt_cfg, market)
     result = sim.run(WARM, WARM + timedelta(days=120))
     first = result.equity[0]["equity"]
@@ -99,8 +98,23 @@ def test_a_flat_market_produces_no_position(bt_cfg, market):
     """Idle is valid (Invariant 3): no trend, no book."""
     bars, funding, inventory = market
     flat_bars = {
-        s: [type(b)(b.symbol, b.day, 100.0, 100.0, 100.0, 100.0, b.volume, b.quote_volume,
-                    b.open_time_ms, b.close_time_ms, b.source, b.filled) for b in bl]
+        s: [
+            type(b)(
+                b.symbol,
+                b.day,
+                100.0,
+                100.0,
+                100.0,
+                100.0,
+                b.volume,
+                b.quote_volume,
+                b.open_time_ms,
+                b.close_time_ms,
+                b.source,
+                b.filled,
+            )
+            for b in bl
+        ]
         for s, bl in bars.items()
     }
     months = months_between(month_key(START), month_key(END))
@@ -136,8 +150,12 @@ def test_fill_at_close_is_the_documented_time_of_day_variant(bt_cfg, market):
     bars, funding, inventory = market
     months = months_between(month_key(START), month_key(END))
     universes = PointInTimeUniverse(inventory, bars, bt_cfg.universe).build(months)
-    at_open = Simulator(bt_cfg, bars, funding, universes, fill_at="open").run(WARM, WARM + timedelta(days=200))
-    at_close = Simulator(bt_cfg, bars, funding, universes, fill_at="close").run(WARM, WARM + timedelta(days=200))
+    at_open = Simulator(bt_cfg, bars, funding, universes, fill_at="open").run(
+        WARM, WARM + timedelta(days=200)
+    )
+    at_close = Simulator(bt_cfg, bars, funding, universes, fill_at="close").run(
+        WARM, WARM + timedelta(days=200)
+    )
     assert at_open.metrics["net_pnl"] != at_close.metrics["net_pnl"]
     assert at_close.manifest["fill_at"] == "close"
 
@@ -145,7 +163,7 @@ def test_fill_at_close_is_the_documented_time_of_day_variant(bt_cfg, market):
 def test_an_invalid_fill_at_is_refused(bt_cfg, market):
     from aegis.core.errors import ConfigError
 
-    bars, funding, inventory = market
+    bars, funding, _ = market
     with pytest.raises(ConfigError):
         Simulator(bt_cfg, bars, funding, {}, fill_at="midday")
 
@@ -157,18 +175,23 @@ def test_funding_is_charged_to_longs_and_paid_to_shorts(bt_cfg):
     from aegis.core.types import DailyBar, FundingRate, UniverseEntry, UniverseResult
 
     days = [d(2021, 1, 1) + timedelta(days=i) for i in range(5)]
-    bars = {"XUSDT": [DailyBar("XUSDT", day, 100.0, 100.0, 100.0, 100.0, 1.0, 1e9, 0, 0)
-                      for day in days]}
+    bars = {"XUSDT": [DailyBar("XUSDT", day, 100.0, 100.0, 100.0, 100.0, 1.0, 1e9, 0, 0) for day in days]}
     rate = 0.01
-    funding = {"XUSDT": [FundingRate("XUSDT", int((day - d(1970, 1, 1)).days) * 86_400_000,
-                                     rate, 8.0) for day in days]}
-    universes = {month_key(days[0]): UniverseResult(
-        month_key(days[0]), (UniverseEntry("XUSDT", 1, 1e9, 500, True, "test"),))}
+    funding = {
+        "XUSDT": [
+            FundingRate("XUSDT", int((day - d(1970, 1, 1)).days) * 86_400_000, rate, 8.0) for day in days
+        ]
+    }
+    universes = {
+        month_key(days[0]): UniverseResult(
+            month_key(days[0]), (UniverseEntry("XUSDT", 1, 1e9, 500, True, "test"),)
+        )
+    }
 
     from aegis.backtest_trend.simulator import _Book
 
     sim = Simulator(bt_cfg, bars, funding, universes, initial_equity=10_000.0)
-    long_book = _Book(cash=10_000.0, qty={"XUSDT": 10.0})     # +1 000 notional
+    long_book = _Book(cash=10_000.0, qty={"XUSDT": 10.0})  # +1 000 notional
     charged = sim._settle_funding(long_book, days[1], {"XUSDT": 0}, {"XUSDT": 100.0})
     assert charged == pytest.approx(-rate * 1_000.0), "a long pays when funding is positive"
 
@@ -194,9 +217,19 @@ def test_a_changed_bar_changes_the_manifest_checksum(bt_cfg, market):
     tampered = {s: list(b) for s, b in bars.items()}
     first = tampered["S00USDT"][0]
     tampered["S00USDT"][0] = type(first)(
-        first.symbol, first.day, first.open, first.high, first.low, first.close * 1.01,
-        first.volume, first.quote_volume, first.open_time_ms, first.close_time_ms,
-        first.source, first.filled)
+        first.symbol,
+        first.day,
+        first.open,
+        first.high,
+        first.low,
+        first.close * 1.01,
+        first.volume,
+        first.quote_volume,
+        first.open_time_ms,
+        first.close_time_ms,
+        first.source,
+        first.filled,
+    )
     months = months_between(month_key(START), month_key(END))
     u = PointInTimeUniverse(inventory, bars, bt_cfg.universe).build(months)
     a = Simulator(bt_cfg, bars, funding, u).manifest(WARM, END, "default")

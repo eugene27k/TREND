@@ -98,26 +98,28 @@ class RiskSupervisor:
         if s.breaches:
             self.ctx.alerts.warn(
                 "CAP_BREACH",
-                f"caps exceeded: {', '.join(s.breaches)} "
-                f"(gross {s.gross_x:.2f}x, net {s.net_x:+.2f}x)",
+                f"caps exceeded: {', '.join(s.breaches)} (gross {s.gross_x:.2f}x, net {s.net_x:+.2f}x)",
                 {"gross_x": s.gross_x, "net_x": s.net_x, "breaches": list(s.breaches)},
             )
         if s.status is RiskStatus.RED:
             self.ctx.alerts.emit(
-                Severity.CRITICAL, "MARGIN_RED",
+                Severity.CRITICAL,
+                "MARGIN_RED",
                 f"margin ratio {s.margin_ratio:.1%} — reducing every position",
                 {"margin_ratio": s.margin_ratio},
             )
         elif s.margin_ratio >= self.ctx.cfg.risk.margin_amber:
             self.ctx.alerts.warn(
-                "MARGIN_AMBER", f"margin ratio {s.margin_ratio:.1%} — risk-increasing blocked",
+                "MARGIN_AMBER",
+                f"margin ratio {s.margin_ratio:.1%} — risk-increasing blocked",
                 {"margin_ratio": s.margin_ratio},
             )
 
     # -- reductions the supervisor asks for --------------------------------- #
 
-    def reductions(self, snapshot: ExposureSnapshot,
-                   positions: Mapping[str, Position]) -> list[ReductionOrder]:
+    def reductions(
+        self, snapshot: ExposureSnapshot, positions: Mapping[str, Position]
+    ) -> list[ReductionOrder]:
         """What must shrink, and by how much (US-T12 AC 2).
 
         ``red`` outranks a cap breach: reduce *everything* by 25 % rather than
@@ -171,8 +173,12 @@ class RiskSupervisor:
 
     # -- the survivable-downtime rule (US-T12 AC 3, Aegis US-19 AC 5) -------- #
 
-    def survivable_move(self, positions: Mapping[str, Position], equity: float,
-                        maint_margin_rate: float = DEFAULT_MAINT_MARGIN_RATE) -> float:
+    def survivable_move(
+        self,
+        positions: Mapping[str, Position],
+        equity: float,
+        maint_margin_rate: float = DEFAULT_MAINT_MARGIN_RATE,
+    ) -> float:
         """The adverse price move the net book survives before liquidation.
 
         Modelled as a single common shock against the *net* position, which is
@@ -253,7 +259,8 @@ class RiskSupervisor:
         days = balance / daily
         if days < self.ctx.cfg.risk.bnb_min_days:
             self.ctx.alerts.warn(
-                "BNB_LOW", f"BNB fee balance covers {days:.1f} days",
+                "BNB_LOW",
+                f"BNB fee balance covers {days:.1f} days",
                 {"balance": balance, "days": days},
             )
         return days

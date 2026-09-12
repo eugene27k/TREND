@@ -28,6 +28,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import date, timedelta
+from itertools import pairwise
 
 from aegis.core.clock import DAY_MS, day_of, day_start_ms
 from aegis.core.context import Context
@@ -189,7 +190,7 @@ class BarService:
         """
         prices = self.closes(symbol, end=end, limit=None if limit is None else limit + 1)
         out: list[float] = []
-        for previous, current in zip(prices, prices[1:], strict=False):
+        for previous, current in pairwise(prices):
             if previous <= 0 or current <= 0:
                 raise DataGap(f"{symbol}: non-positive close in the return series")
             out.append(math.log(current / previous))
@@ -280,8 +281,9 @@ class BarService:
             out[symbol] = rate.annualised()
         return out
 
-    def stored_funding(self, symbol: str, start_ms: int | None = None,
-                       end_ms: int | None = None) -> list[FundingRate]:
+    def stored_funding(
+        self, symbol: str, start_ms: int | None = None, end_ms: int | None = None
+    ) -> list[FundingRate]:
         """Realised settlements as stored — the attribution and backtest input."""
         return self.funding.history(symbol, start_ms=start_ms, end_ms=end_ms)
 

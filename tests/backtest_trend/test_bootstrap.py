@@ -10,7 +10,7 @@ from aegis.backtest_trend.bootstrap import block_bootstrap, percentile_of
 
 def test_a_constant_series_gives_the_exact_compound_value_with_no_spread():
     d = block_bootstrap([0.001] * 900, resamples=500, horizon_days=91)
-    expected = 10_000 * ((1.001 ** 91) - 1)
+    expected = 10_000 * ((1.001**91) - 1)
     assert d[50.0] == pytest.approx(expected, rel=1e-9)
     assert max(d.values()) - min(d.values()) == pytest.approx(0.0, abs=1e-6)
 
@@ -18,7 +18,7 @@ def test_a_constant_series_gives_the_exact_compound_value_with_no_spread():
 def test_the_distribution_matches_the_realised_windows_it_resamples():
     rng = np.random.default_rng(1)
     series = rng.normal(0.0005, 0.02, 900)
-    realised = [10_000 * (np.prod(1 + series[i:i + 91]) - 1) for i in range(900 - 91)]
+    realised = [10_000 * (np.prod(1 + series[i : i + 91]) - 1) for i in range(900 - 91)]
     d = block_bootstrap(series.tolist(), resamples=20_000, horizon_days=91)
     assert d[50.0] == pytest.approx(float(np.median(realised)), rel=0.25)
     assert d[5.0] == pytest.approx(float(np.percentile(realised, 5)), rel=0.25)
@@ -61,8 +61,8 @@ def test_empty_or_degenerate_input_returns_nothing_rather_than_a_fake_number():
 
 def test_percentile_of_locates_an_observed_quarter_in_the_distribution():
     d = {5.0: -500.0, 50.0: 0.0, 95.0: 500.0}
-    assert percentile_of(-1000.0, d) == 5.0        # clamped at the bottom
-    assert percentile_of(1000.0, d) == 95.0        # clamped at the top
+    assert percentile_of(-1000.0, d) == 5.0  # clamped at the bottom
+    assert percentile_of(1000.0, d) == 95.0  # clamped at the top
     assert percentile_of(0.0, d) == pytest.approx(50.0)
     assert percentile_of(-250.0, d) == pytest.approx(27.5, abs=0.1)
     assert percentile_of(0.0, {}) is None

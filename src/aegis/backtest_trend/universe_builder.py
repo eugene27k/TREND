@@ -48,9 +48,17 @@ def synthesise_symbol_info(
     status = "TRADING" if previous in set(months) else "DELISTED"
     base = symbol[: -len(quote_asset)] if symbol.endswith(quote_asset) else symbol
     return SymbolInfo(
-        symbol=symbol, base_asset=base, quote_asset=quote_asset, status=status,
-        contract_type="PERPETUAL", tick_size=tick_size, step_size=step_size,
-        min_qty=step_size, min_notional=min_notional, price_precision=6, quantity_precision=3,
+        symbol=symbol,
+        base_asset=base,
+        quote_asset=quote_asset,
+        status=status,
+        contract_type="PERPETUAL",
+        tick_size=tick_size,
+        step_size=step_size,
+        min_qty=step_size,
+        min_notional=min_notional,
+        price_precision=6,
+        quantity_precision=3,
     )
 
 
@@ -74,8 +82,9 @@ class PointInTimeUniverse:
             exchange_info: dict[str, SymbolInfo] = {}
             volume_history: dict[str, list[DailyBar]] = {}
             for symbol, symbol_months in self.inventory.items():
-                info = synthesise_symbol_info(symbol, symbol_months, month,
-                                              quote_asset=self.params.quote_asset)
+                info = synthesise_symbol_info(
+                    symbol, symbol_months, month, quote_asset=self.params.quote_asset
+                )
                 exchange_info[symbol] = info
                 # select_universe filters to bars before the month itself, but
                 # slicing here keeps the per-month input small on 5 years of data.

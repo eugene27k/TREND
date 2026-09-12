@@ -21,6 +21,11 @@ Why the caps are ordered and re-checked rather than solved jointly:
   ordering is what makes the post-condition — all three caps hold — provable
   rather than hopeful, and ``check_caps`` re-asserts it on the way out.
 
+The two steps that follow the caps (the funding haircut and the zeroing floor)
+shrink individual legs, which leaves single and gross intact but can lift ``net``
+when the shrunk legs were on the minority side — so the net cap is applied once
+more on the final book. The post-condition is on what leaves this function.
+
 ``N`` is the *fixed* universe size (16), not the count of symbols that happen to
 have a signal today. Dividing by the live count would quietly lever the book up
 on days when most symbols are flat — exactly the days when the remaining signals
@@ -62,8 +67,9 @@ class _Leg:
     caps: list[str] = field(default_factory=list)
 
     def mark(self, cap: str) -> None:
-        """Each cap runs exactly once, so ``caps_applied`` stays in CAP_ORDER."""
-        self.caps.append(cap)
+        """Record a cap application; ``_freeze`` normalises the list to CAP_ORDER."""
+        if cap not in self.caps:
+            self.caps.append(cap)
 
 
 def _finite(value: object, default: float = 0.0) -> float:
@@ -298,6 +304,16 @@ def size_targets(
         if abs(leg.target) < floor:
             leg.target = 0.0
 
+    # The funding haircut and the zeroing floor only ever *shrink* individual
+    # legs, which cannot re-break single or gross — but it can break net, because
+    # shrinking the minority side of a directional book raises net exposure
+    # (halve the only short in a net-long book and net goes up). Invariant 8 is a
+    # post-condition on what leaves this function, not on an intermediate book, so
+    # the net cap runs once more on the final one. A leg the re-scale pushes back
+    # under min_notional is left for the planner to drop: a cap is a risk bound
+    # and outranks a dust rule.
+    _apply_net_cap(legs, cfg.caps.net * equity)
+
     out = _freeze(
         legs, sigma_p=sigma_p, conv=conv, sigma_eff=sigma_eff, s=s, g=governor_g, equity=equity, prices=prices
     )
@@ -331,7 +347,7 @@ def _freeze(
                 target_notional=leg.target,
                 funding_ann=leg.funding,
                 funding_haircut=leg.haircut,
-                caps_applied=tuple(leg.caps),
+                caps_applied=tuple(cap for cap in CAP_ORDER if cap in leg.caps),
                 target_qty=leg.target / price if price > 0.0 else 0.0,
             )
         )

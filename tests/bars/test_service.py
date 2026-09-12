@@ -10,7 +10,7 @@ from aegis.bars.service import BarService
 from aegis.core.clock import FakeClock, at_utc, to_ms
 from aegis.core.config import load_config
 from aegis.core.context import Context
-from aegis.core.errors import ExchangeUnreachable
+from aegis.core.errors import DataGap, ExchangeUnreachable
 from aegis.core.types import FundingRate, Strategy
 from aegis.gateway.fake import FakeGateway
 from aegis.ops.alerts import AlertBus
@@ -45,13 +45,15 @@ def bars(ctx: Context) -> BarService:
     return BarService(ctx)
 
 
-def seed(ctx: Context, symbol: str, days: int, *, end: date = LAST_CLOSED,
-         quote_volume: float = 50_000_000.0) -> list[float]:
+def seed(
+    ctx: Context, symbol: str, days: int, *, end: date = LAST_CLOSED, quote_volume: float = 50_000_000.0
+) -> list[float]:
     """``days`` daily closes on the venue, ending on ``end``."""
     closes = [100.0 + i for i in range(days)]
     ctx.gateway.set_symbol_info(symbol)
-    ctx.gateway.set_closes(symbol, closes, start_day=end - timedelta(days=days - 1),
-                           quote_volume=quote_volume)
+    ctx.gateway.set_closes(
+        symbol, closes, start_day=end - timedelta(days=days - 1), quote_volume=quote_volume
+    )
     return closes
 
 
@@ -134,9 +136,7 @@ def test_us_t03_ac1_ensure_day_past_the_deadline_makes_exactly_one_attempt(
     assert ctx.gateway.calls["daily_bars"] == 1
 
 
-def test_us_t03_ac1_a_forward_filled_day_is_still_owed_a_real_bar(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac1_a_forward_filled_day_is_still_owed_a_real_bar(ctx: Context, bars: BarService) -> None:
     seed(ctx, SYMBOL, 3, end=LAST_CLOSED - timedelta(days=1))
     bars.backfill([SYMBOL], min_days=3)
     bars.forward_fill([SYMBOL], through=LAST_CLOSED)
@@ -181,13 +181,13 @@ def test_us_t03_ac2_gap_is_forward_filled_flagged_and_excluded_from_realised_bar
     assert bars.closes(SYMBOL) == [100.0, 110.0, 110.0, 133.1]
     # ...and every money question structurally cannot.
     assert [b.day for b in bars.realised_bars(SYMBOL)] == [
-        date(2026, 9, 1), date(2026, 9, 2), date(2026, 9, 4)
+        date(2026, 9, 1),
+        date(2026, 9, 2),
+        date(2026, 9, 4),
     ]
 
 
-def test_us_t03_ac2_log_returns_include_the_filled_day_as_zero(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac2_log_returns_include_the_filled_day_as_zero(ctx: Context, bars: BarService) -> None:
     gapped(ctx)
     bars.backfill([SYMBOL], min_days=4)
     bars.forward_fill([SYMBOL], through=date(2026, 9, 4))
@@ -200,9 +200,7 @@ def test_us_t03_ac2_log_returns_include_the_filled_day_as_zero(
     assert bars.log_returns(SYMBOL, limit=2) == pytest.approx(returns[-2:])
 
 
-def test_us_t03_ac2_forward_fill_invents_nothing_before_the_first_bar(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac2_forward_fill_invents_nothing_before_the_first_bar(ctx: Context, bars: BarService) -> None:
     seed(ctx, SYMBOL, 3, end=date(2026, 9, 4))
     bars.backfill([SYMBOL], min_days=3)
 
@@ -234,9 +232,7 @@ def test_us_t03_ac2_a_real_bar_replaces_the_forward_filled_placeholder(
 # --------------------------------------------------------------------------- #
 
 
-def test_us_t03_avg_daily_quote_volume_ignores_forward_filled_bars(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_avg_daily_quote_volume_ignores_forward_filled_bars(ctx: Context, bars: BarService) -> None:
     gapped(ctx)
     bars.backfill([SYMBOL], min_days=4)
     bars.forward_fill([SYMBOL], through=date(2026, 9, 4))
@@ -265,8 +261,7 @@ def test_us_t03_volume_history_is_point_in_time(ctx: Context, bars: BarService) 
 def settlements(symbol: str, day: date, rates: list[float]) -> list[FundingRate]:
     base = to_ms(day)
     return [
-        FundingRate(symbol=symbol, funding_time_ms=base + i * 8 * 3_600_000, rate=r,
-                    interval_hours=8.0)
+        FundingRate(symbol=symbol, funding_time_ms=base + i * 8 * 3_600_000, rate=r, interval_hours=8.0)
         for i, r in enumerate(rates)
     ]
 
@@ -283,14 +278,13 @@ def test_us_t03_ac3_sync_funding_is_idempotent(ctx: Context, bars: BarService) -
     assert [f.rate for f in stored] == [1e-4, 2e-4, 3e-4]
 
 
-def test_us_t03_ac3_sync_funding_resumes_from_the_stored_cursor(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac3_sync_funding_resumes_from_the_stored_cursor(ctx: Context, bars: BarService) -> None:
     rows = settlements(SYMBOL, date(2026, 9, 6), [1e-4, 2e-4])
     ctx.gateway.set_funding(SYMBOL, rows)
     bars.sync_funding([SYMBOL], ctx.now_ms())
-    later = FundingRate(symbol=SYMBOL, funding_time_ms=rows[-1].funding_time_ms + 8 * 3_600_000,
-                        rate=5e-4, interval_hours=4.0)
+    later = FundingRate(
+        symbol=SYMBOL, funding_time_ms=rows[-1].funding_time_ms + 8 * 3_600_000, rate=5e-4, interval_hours=4.0
+    )
     ctx.gateway.set_funding(SYMBOL, [*rows, later])
 
     added = bars.sync_funding([SYMBOL], ctx.now_ms())
@@ -313,9 +307,7 @@ def test_us_t03_ac4_predicted_funding_annualises_with_the_symbol_interval(
     assert annualised["ETHUSDT"] == pytest.approx(0.0004 * 8760 / 4)
 
 
-def test_us_t03_ac4_predicted_funding_prefers_the_stored_interval(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac4_predicted_funding_prefers_the_stored_interval(ctx: Context, bars: BarService) -> None:
     # US-T11 AC 3: the funding-interval watch stores 4h; the overlay must use it
     # even while premiumIndex is still answering with the 8h default.
     info = ctx.gateway.set_symbol_info(SYMBOL, funding_interval_hours=4.0)
@@ -349,3 +341,33 @@ def test_us_t03_backfill_survives_an_unreachable_venue(ctx: Context, bars: BarSe
 
 def test_us_t03_last_closed_day_is_yesterday_utc(bars: BarService) -> None:
     assert bars.last_closed_day() == LAST_CLOSED
+
+
+def test_us_t03_ac1_a_day_already_stored_is_not_re_fetched(ctx: Context, bars: BarService) -> None:
+    seed(ctx, SYMBOL, 3)
+    bars.backfill([SYMBOL], min_days=3)
+    calls = ctx.gateway.calls["daily_bars"]
+
+    fetched, missing = bars.fetch_closed_day([SYMBOL], LAST_CLOSED)
+
+    assert (fetched, missing) == ({SYMBOL}, set())
+    assert ctx.gateway.calls["daily_bars"] == calls
+
+
+def test_us_t03_ac1_backfill_of_an_unknown_symbol_stores_nothing(ctx: Context, bars: BarService) -> None:
+    assert bars.backfill(["NOPEUSDT"], min_days=3) == {"NOPEUSDT": 0}
+
+
+def test_us_t03_ac2_forward_fill_skips_symbols_with_no_bars(bars: BarService) -> None:
+    assert bars.forward_fill(["NOPEUSDT"], through=LAST_CLOSED) == 0
+
+
+def test_us_t03_ac2_a_non_positive_close_is_a_data_gap_not_a_silent_zero(
+    ctx: Context, bars: BarService
+) -> None:
+    ctx.gateway.set_symbol_info(SYMBOL)
+    ctx.gateway.set_closes(SYMBOL, [100.0, 0.0], start_day=date(2026, 9, 6))
+    bars.backfill([SYMBOL], min_days=2)
+
+    with pytest.raises(DataGap):
+        bars.log_returns(SYMBOL)

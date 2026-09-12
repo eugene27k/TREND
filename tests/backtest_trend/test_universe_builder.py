@@ -43,7 +43,8 @@ def test_us_t16_ac1_a_delisted_symbol_is_in_the_universes_of_the_months_it_exist
     inventory = {s: sorted({month_key(b.day) for b in bl}) for s, bl in live.items()}
 
     universes = PointInTimeUniverse(inventory, live, bt_cfg.universe).build(
-        months_between("2022-05", "2022-10"))
+        months_between("2022-05", "2022-10")
+    )
     assert "DEADUSDT" in universes["2022-05"].symbols, "it was tradeable then"
     assert "DEADUSDT" not in universes["2022-09"].symbols, "it was gone by then"
 
@@ -55,7 +56,8 @@ def test_us_t02_ac4_a_symbol_listed_later_never_appears_earlier(bt_cfg):
     inventory = {s: sorted({month_key(b.day) for b in bl}) for s, bl in bars.items()}
 
     universes = PointInTimeUniverse(inventory, bars, bt_cfg.universe).build(
-        months_between("2022-01", "2022-12"))
+        months_between("2022-01", "2022-12")
+    )
     for month, result in universes.items():
         assert "NEWUSDT" not in result.symbols, month
 
@@ -65,7 +67,8 @@ def test_every_month_selects_at_most_the_configured_size(bt_cfg):
     bars = {f"S{i:02d}USDT": bars_for(f"S{i:02d}USDT", start, 900, 1e9 - i * 1e6) for i in range(30)}
     inventory = {s: sorted({month_key(b.day) for b in bl}) for s, bl in bars.items()}
     universes = PointInTimeUniverse(inventory, bars, bt_cfg.universe).build(
-        months_between("2022-05", "2022-08"))
+        months_between("2022-05", "2022-08")
+    )
     for month, result in universes.items():
         assert len(result.symbols) <= bt_cfg.universe.size, month
 

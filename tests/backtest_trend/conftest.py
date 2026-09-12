@@ -22,8 +22,9 @@ DAYS = 900
 N_SYMBOLS = 20
 
 
-def make_market(seed: int = 7, days: int = DAYS, n_symbols: int = N_SYMBOLS,
-                regime_days: int = 120) -> tuple[dict, dict, dict]:
+def make_market(
+    seed: int = 7, days: int = DAYS, n_symbols: int = N_SYMBOLS, regime_days: int = 120
+) -> tuple[dict, dict, dict]:
     """A market with genuine, flipping trends — the regime momentum is built for."""
     rng = random.Random(seed)
     bars: dict[str, list[DailyBar]] = {}
@@ -41,9 +42,21 @@ def make_market(seed: int = 7, days: int = DAYS, n_symbols: int = N_SYMBOLS,
                 drift = -drift
             price *= math.exp(rng.gauss(drift, 0.025))
             open_ = price * math.exp(rng.gauss(0.0, 0.002))
-            rows.append(DailyBar(symbol, day, open_, max(open_, price) * 1.01,
-                                 min(open_, price) * 0.99, price, 1e5,
-                                 5e8 * (1 + 0.05 * k), 0, 0, source="synthetic"))
+            rows.append(
+                DailyBar(
+                    symbol,
+                    day,
+                    open_,
+                    max(open_, price) * 1.01,
+                    min(open_, price) * 0.99,
+                    price,
+                    1e5,
+                    5e8 * (1 + 0.05 * k),
+                    0,
+                    0,
+                    source="synthetic",
+                )
+            )
             base_ms = int((day - date(1970, 1, 1)).days) * 86_400_000
             for hour in (0, 8, 16):
                 rates.append(FundingRate(symbol, base_ms + hour * 3_600_000, 0.0001, 8.0))

@@ -66,8 +66,7 @@ class KillRules:
             action = check(now_ms)
             if action is not None:
                 actions.append(action)
-                self.ctx.alerts.emit(action.severity, action.rule.upper(), action.message,
-                                     action.context)
+                self.ctx.alerts.emit(action.severity, action.rule.upper(), action.message, action.context)
         return actions
 
     # -- individual rules --------------------------------------------------- #
@@ -97,8 +96,11 @@ class KillRules:
         if dd < threshold:
             return None
         return KillAction(
-            rule=HARD_HALT, severity=Severity.CRITICAL, block_risk_increasing=True,
-            flatten=True, halt=True,
+            rule=HARD_HALT,
+            severity=Severity.CRITICAL,
+            block_risk_increasing=True,
+            flatten=True,
+            halt=True,
             message=f"drawdown {dd:.1%} >= hard halt {threshold:.1%} — flattening and halting",
             context={"drawdown": dd, "threshold": threshold},
         )
@@ -118,7 +120,8 @@ class KillRules:
         # ``between`` is half-open, so ask for now_ms + 1: a transfer stamped at
         # exactly this instant is part of today and must not read as a loss.
         transfers = sum(
-            r["amount"] for r in self.ctx.repos.ledger.between(start, now_ms + 1)
+            r["amount"]
+            for r in self.ctx.repos.ledger.between(start, now_ms + 1)
             if IncomeType.parse(str(r["income_type"])).is_transfer
         )
         change = float(latest["margin_balance"] or 0.0) - equity_open - transfers
@@ -126,8 +129,11 @@ class KillRules:
         if loss_frac > -cfg.daily_loss_block:
             return None
         return KillAction(
-            rule=DAILY_LOSS, severity=Severity.WARN, block_risk_increasing=True,
-            flatten=False, halt=False,
+            rule=DAILY_LOSS,
+            severity=Severity.WARN,
+            block_risk_increasing=True,
+            flatten=False,
+            halt=False,
             message=f"day P&L {loss_frac:.1%} of equity — risk-increasing orders blocked until the next rebalance",
             context={"loss_frac": loss_frac, "day": day.isoformat()},
         )
@@ -153,10 +159,15 @@ class KillRules:
         if live >= p05:
             return None
         return KillAction(
-            rule=BOOTSTRAP_P05, severity=Severity.WARN, block_risk_increasing=True,
-            flatten=False, halt=False,
-            message=(f"rolling 3-month P&L {live:.2f} below the backtest bootstrap p05 {p05:.2f} — "
-                     "risk-increasing blocked, post-mortem required"),
+            rule=BOOTSTRAP_P05,
+            severity=Severity.WARN,
+            block_risk_increasing=True,
+            flatten=False,
+            halt=False,
+            message=(
+                f"rolling 3-month P&L {live:.2f} below the backtest bootstrap p05 {p05:.2f} — "
+                "risk-increasing blocked, post-mortem required"
+            ),
             context={"live_3m": live, "bootstrap_p05": p05},
         )
 
@@ -170,8 +181,11 @@ class KillRules:
         if breach_days < cfg.breach_days_block:
             return None
         return KillAction(
-            rule=TRACKING_ERROR, severity=Severity.WARN, block_risk_increasing=True,
-            flatten=False, halt=False,
+            rule=TRACKING_ERROR,
+            severity=Severity.WARN,
+            block_risk_increasing=True,
+            flatten=False,
+            halt=False,
             message=f"tracking bounds breached {breach_days} days — risk-increasing blocked",
             context={"breach_days": breach_days, "day": latest["day"]},
         )
@@ -185,10 +199,15 @@ class KillRules:
         if streak < cfg.failure_days:
             return None
         return KillAction(
-            rule=REBALANCE_FAILURE, severity=Severity.CRITICAL, block_risk_increasing=True,
-            flatten=False, halt=False,
-            message=(f"{streak} consecutive rebalances below {cfg.failure_completion_pct:.0f} % "
-                     "completion — blocked until acknowledged"),
+            rule=REBALANCE_FAILURE,
+            severity=Severity.CRITICAL,
+            block_risk_increasing=True,
+            flatten=False,
+            halt=False,
+            message=(
+                f"{streak} consecutive rebalances below {cfg.failure_completion_pct:.0f} % "
+                "completion — blocked until acknowledged"
+            ),
             context={"streak": streak},
         )
 
@@ -203,9 +222,13 @@ class KillRules:
         return KillAction(
             rule=RECONCILIATION,
             severity=Severity.CRITICAL if critical else Severity.WARN,
-            block_risk_increasing=True, flatten=False, halt=False,
-            message=(f"{len(breaks)} open reconciliation break(s), oldest {age_min:.0f} min "
-                     f"({from_ms(oldest).isoformat()})"),
+            block_risk_increasing=True,
+            flatten=False,
+            halt=False,
+            message=(
+                f"{len(breaks)} open reconciliation break(s), oldest {age_min:.0f} min "
+                f"({from_ms(oldest).isoformat()})"
+            ),
             context={"count": len(breaks), "age_minutes": age_min},
         )
 
@@ -215,8 +238,7 @@ class KillRules:
         """Every rule with its current state — the US-T18 AC 3 kill-rule board."""
         fired = {a.rule: a for a in self.evaluate(now_ms)}
         return [
-            {"rule": rule, "active": rule in fired,
-             "detail": fired[rule].message if rule in fired else ""}
+            {"rule": rule, "active": rule in fired, "detail": fired[rule].message if rule in fired else ""}
             for rule in ALL_RULES
         ]
 

@@ -124,15 +124,21 @@ class UniverseService:
             self.ctx.alerts.info(
                 "UNIVERSE_ENTRY",
                 f"universe {result.month} entrants: " + ", ".join(entrants),
-                {"month": result.month, "symbols": entrants,
-                 "reasons": {s: _reason(result, s) for s in entrants}},
+                {
+                    "month": result.month,
+                    "symbols": entrants,
+                    "reasons": {s: _reason(result, s) for s in entrants},
+                },
             )
         if leavers:
             self.ctx.alerts.info(
                 "UNIVERSE_EXIT",
                 f"universe {result.month} leavers: " + ", ".join(leavers),
-                {"month": result.month, "symbols": leavers,
-                 "reasons": {s: _reason(result, s) for s in leavers}},
+                {
+                    "month": result.month,
+                    "symbols": leavers,
+                    "reasons": {s: _reason(result, s) for s in leavers},
+                },
             )
 
     # ------------------------------------------------------------------ #

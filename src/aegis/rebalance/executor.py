@@ -37,16 +37,16 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from datetime import date as _date
 
-from aegis.core.clock import day_of
+from aegis.core.clock import add_months, at_utc, day_of
 from aegis.core.context import Context
-from aegis.core.errors import AegisError, OrderRejected
+from aegis.core.errors import AegisError, GatewayError, OrderRejected
 from aegis.core.precision import round_price, round_qty, slippage_bps
 from aegis.core.types import (
     Fill,
     Order,
     OrderRequest,
-    OrderStatus,
     OrderType,
     PlannedOrder,
     RebalanceStatus,
@@ -111,6 +111,8 @@ class RebalanceExecutor:
         self.ctx = ctx
         self._info: dict[str, SymbolInfo] = {}
         self._seen_trades: set[str] = set()
+        self._slice_orders: dict[str, set[str]] = {}
+        self._coid_seq = 0
         self._window_hit = False
 
     # ------------------------------------------------------------------ #
@@ -166,17 +168,21 @@ class RebalanceExecutor:
         plan = _plan_from_rows(json_loads(row["order_plan_json"], []))
         mids = {str(k): float(v) for k, v in (json_loads(row["decision_mids_json"], {}) or {}).items()}
         cursor = int(row["cursor"] or 0)
+        kind = str(row["kind"])
+        # The escalation is a property of *why* we are trading, and that is what
+        # ``kind`` records — a resumed risk cut stays a risk cut.
+        escalate_s = self.ctx.cfg.exec.risk_escalate_s if kind in (KIND_RISK_CUT, KIND_FLATTEN) else None
         self.ctx.repos.rebalances.set_status(rebalance_id, str(RebalanceStatus.RUNNING))
         return self._work(
             rebalance_id,
             plan,
             mids,
             end_ts_ms=end_ts_ms,
-            escalate_s=int(row["escalate_s"]) if "escalate_s" in row.keys() else None,
+            escalate_s=escalate_s,
             started_ts=int(row["started_ts"]),
             cursor=cursor,
             planned_notional=float(row["planned_notional"] or 0.0),
-            kind=str(row["kind"]),
+            kind=kind,
         )
 
     def flatten_all(self, reason: str, now_ms: int) -> RebalanceOutcome:
@@ -434,16 +440,14 @@ class RebalanceExecutor:
             repos.slices.finish(slice_id, str(SliceOutcome.REJECTED), 0.0, 0.0, False, clock.now_ms())
             return _SliceResult(0.0, abandon=False)
 
+        waited = False
         for _ in range(MAX_SLICE_ITERATIONS):
-            wake = min(clock.now_ms() + self.ctx.cfg.exec.repeg_s * 1000, deadline, end_ts_ms)
-            self._sleep_until(wake)
-            now = clock.now_ms()
-
             order = self._refresh(order)
             if order.status.is_terminal:
                 outcome = SliceOutcome.FILLED if order.filled_qty > 0 else SliceOutcome.CANCELLED
                 break
 
+            now = clock.now_ms()
             if now >= end_ts_ms:
                 order = self._cancel(order)
                 self._window_hit = True
@@ -455,39 +459,50 @@ class RebalanceExecutor:
                 remaining = round_qty(order.remaining_qty, info)
                 if remaining > 0 and self._tradeable(remaining, planned.symbol, info):
                     try:
-                        order = self._place_taker(
-                            planned, info, side, remaining, slice_id, rebalance_id
-                        )
+                        order = self._place_taker(planned, info, side, remaining, slice_id, rebalance_id)
                     except OrderRejected as exc:
                         return self._slice_rejected(slice_id, planned, exc)
                     order = self._refresh(order)
                     if not order.status.is_terminal:
+                        # An IOC is terminal at a real venue the moment it lands;
+                        # cancelling is how a simulator and a stuck order agree.
                         order = self._cancel(order)
                     taker = True
                 outcome = SliceOutcome.ESCALATED
                 break
 
-            book = self.ctx.gateway.book_ticker(planned.symbol)
-            passive = round_price(book.passive_price(side), info, side)
-            if order.price is not None and passive != order.price:
-                self._cancel(order)
-                repos.slices.bump_repegs(slice_id)
-                remaining = round_qty(order.remaining_qty, info)
-                if remaining <= 0 or not self._tradeable(remaining, planned.symbol, info):
-                    outcome = SliceOutcome.FILLED if order.filled_qty > 0 else SliceOutcome.CANCELLED
-                    break
-                try:
-                    replacement = self._place_passive(
-                        planned, info, side, remaining, slice_id, rebalance_id
-                    )
-                except OrderRejected as exc:
-                    return self._slice_rejected(slice_id, planned, exc)
-                if replacement is None:
-                    outcome = SliceOutcome.CANCELLED
-                    break
-                order = replacement
+            # The re-peg only applies to an order that has actually been resting:
+            # checking it the instant after placing would fight our own price.
+            if waited:
+                book = self.ctx.gateway.book_ticker(planned.symbol)
+                passive = round_price(book.passive_price(side), info, side)
+                if order.price is not None and passive != order.price:
+                    order = self._cancel(order)
+                    repos.slices.bump_repegs(slice_id)
+                    remaining = round_qty(order.remaining_qty, info)
+                    if remaining <= 0 or not self._tradeable(remaining, planned.symbol, info):
+                        outcome = (
+                            SliceOutcome.FILLED if order.filled_qty > 0 else SliceOutcome.CANCELLED
+                        )
+                        break
+                    try:
+                        replacement = self._place_passive(
+                            planned, info, side, remaining, slice_id, rebalance_id
+                        )
+                    except OrderRejected as exc:
+                        return self._slice_rejected(slice_id, planned, exc)
+                    if replacement is None:
+                        outcome = SliceOutcome.CANCELLED
+                        break
+                    order = replacement
+                    continue
 
-        filled, avg_price = self._record_fills(planned, slice_id, rebalance_id, decision_mid)
+            self._sleep_until(min(clock.now_ms() + self.ctx.cfg.exec.repeg_s * 1000, deadline, end_ts_ms))
+            waited = True
+
+        filled, avg_price = self._record_fills(
+            planned, slice_id, rebalance_id, decision_mid, placed_ts
+        )
         repos.slices.finish(slice_id, str(outcome), filled, avg_price, taker, clock.now_ms())
         return _SliceResult(filled)
 
@@ -548,7 +563,9 @@ class RebalanceExecutor:
         rebalance_id: str,
     ) -> Order:
         book = self.ctx.gateway.book_ticker(planned.symbol)
-        price = round_price(book.aggressive_price(side), info, side.BUY if False else None)
+        # No side-conservative rounding here: a taker price must stay marketable,
+        # so it is snapped to the nearest tick rather than away from the book.
+        price = round_price(book.aggressive_price(side), info)
         return self._send(planned, side, qty, price, TimeInForce.IOC, slice_id, rebalance_id)
 
     def _send(
@@ -569,15 +586,21 @@ class RebalanceExecutor:
             price=price,
             time_in_force=tif,
             reduce_only=planned.reduce_only,
-            client_order_id=f"{slice_id}:{tif}:{self.ctx.clock.now_ms()}",
+            client_order_id=self._client_order_id(),
             strategy=self.ctx.strategy,
             rebalance_id=rebalance_id,
             slice_id=slice_id,
             intent="rebalance",
         )
         order = self.ctx.gateway.place_order(request)
+        self._slice_orders.setdefault(slice_id, set()).add(order.order_id)
         self.ctx.repos.orders.upsert(order)
         return order
+
+    def _client_order_id(self) -> str:
+        """Short and unique: Binance caps ``newClientOrderId`` at 36 characters."""
+        self._coid_seq += 1
+        return f"T{self.ctx.clock.now_ms()}-{self._coid_seq}"
 
     def _refresh(self, order: Order) -> Order:
         fresh = self.ctx.gateway.get_order(order.symbol, order.order_id)
@@ -600,12 +623,16 @@ class RebalanceExecutor:
             self._cancel(order)
 
     def _record_fills(
-        self, planned: PlannedOrder, slice_id: str, rebalance_id: str, decision_mid: float
+        self, planned: PlannedOrder, slice_id: str, rebalance_id: str, decision_mid: float,
+        since_ms: int,
     ) -> tuple[float, float]:
         """Store this slice's prints with slippage against the decision mid (5.9 step 1)."""
         rows: list[Fill] = []
-        for fill in self.ctx.gateway.user_trades(planned.symbol, start_ms=None):
-            if fill.trade_id in self._seen_trades or fill.slice_id != slice_id:
+        # Match on our own order ids: a live venue's ``userTrades`` knows nothing
+        # about slices, so the slice tag has to be re-attached here.
+        our_orders = self._slice_orders.get(slice_id, set())
+        for fill in self.ctx.gateway.user_trades(planned.symbol, start_ms=since_ms):
+            if fill.trade_id in self._seen_trades or fill.order_id not in our_orders:
                 continue
             self._seen_trades.add(fill.trade_id)
             rows.append(
@@ -740,8 +767,6 @@ class RebalanceExecutor:
 
     def _next_refresh_ms(self, now_ms: int) -> int:
         """Flags last until the next monthly universe refresh clears them."""
-        from aegis.core.clock import add_months, at_utc
-
         first_next = add_months(day_of(now_ms).replace(day=1), 1)
         return at_utc(first_next, self.ctx.cfg.universe.refresh_time_utc)
 
@@ -771,8 +796,6 @@ class RebalanceExecutor:
         return info
 
     def _decision_mid(self, symbol: str) -> float:
-        from aegis.core.errors import GatewayError
-
         try:
             return self.ctx.gateway.book_ticker(symbol).mid
         except GatewayError:
@@ -795,8 +818,6 @@ class RebalanceExecutor:
 
 
 def _ordinal_iso(ordinal: int) -> str:
-    from datetime import date as _date
-
     return _date.fromordinal(ordinal).isoformat()
 
 

@@ -290,6 +290,78 @@ def test_us_t06_ac2_cap_order_constant_matches_the_application_order() -> None:
     assert CAP_ORDER == (CAP_SINGLE, CAP_NET, CAP_GROSS)
 
 
+def _directional_book(equity: float, cfg: AppConfig, **kwargs: object) -> Targets:
+    """Eight longs and one short — a book the net cap binds on, not the gross cap."""
+    desired = {f"L{i}": 2_500.0 for i in range(8)}
+    desired["S0"] = -2_000.0
+    signals = {s: v / equity for s, v in desired.items()}
+    return size_targets(
+        signals,
+        dict.fromkeys(desired, 1.0),
+        rig_risk_model(tuple(sorted(desired))),
+        equity,
+        1.0,
+        cfg,
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_us_t06_ac2_net_cap_holds_after_the_funding_haircut() -> None:
+    """Halving the minority side *raises* net, so the cap is re-checked last.
+
+    Pre-cap ``8 x +2 500`` and one ``-2 000`` on E = 10 000: net 18 000 > 1.5 E,
+    so the net cap scales the longs by ``(15 000 + 2 000) / 20 000 = 0.85`` to
+    2 125 each (net 15 000, gross 19 000 — the gross cap never bites). The short
+    then pays -40 % funding and is halved to -1 000, which lifts net to 16 000 =
+    1.6 E unless the cap runs again: re-scaling the longs by 16 000 / 17 000 puts
+    each at 2 000 and net back on 15 000. Invariant 8 is a post-condition on the
+    book that leaves ``size_targets``, not on an intermediate one.
+    """
+    cfg = rig_config()  # production caps: single 0.25, net 1.5, gross 2.5
+    out = _directional_book(10_000.0, cfg, funding_ann={"S0": -0.40})
+
+    assert notionals(out) == pytest.approx({**{f"L{i}": 2_000.0 for i in range(8)}, "S0": -1_000.0})
+    assert out.net == pytest.approx(1.5 * 10_000.0)
+    assert out.by_symbol()["S0"].funding_haircut == 0.5
+    assert check_caps(out, cfg) == ()
+
+
+def test_us_t06_ac2_net_cap_holds_after_the_zeroing_floor() -> None:
+    """Zeroing the minority leg raises net exactly as the haircut does.
+
+    Pre-cap ``8 x +2 500`` and one ``-50`` short with a 100 USDT ``min_notional``:
+    the net cap scales the longs by ``(15 000 + 50) / 20 000 = 0.7525`` to
+    1 881.25 each, then the short is zeroed as dust and net would read 15 050
+    (1.505 E). Re-scaling the longs by 15 000 / 15 050 puts each on 1 875.
+    """
+    cfg = rig_config()
+    desired = {f"L{i}": 2_500.0 for i in range(8)}
+    desired["S0"] = -50.0
+    equity = 10_000.0
+    out = size_targets(
+        {s: v / equity for s, v in desired.items()},
+        dict.fromkeys(desired, 1.0),
+        rig_risk_model(tuple(sorted(desired))),
+        equity,
+        1.0,
+        cfg,
+        min_notionals={"S0": 100.0},
+    )
+
+    assert notionals(out)["S0"] == 0.0
+    assert notionals(out) == pytest.approx({**{f"L{i}": 1_875.0 for i in range(8)}, "S0": 0.0})
+    assert out.net == pytest.approx(1.5 * equity)
+    assert check_caps(out, cfg) == ()
+
+
+def test_us_t06_ac2_caps_applied_stays_in_cap_order_when_net_runs_twice() -> None:
+    cfg = rig_config()
+    out = _directional_book(10_000.0, cfg, funding_ann={"S0": -0.40})
+    for leg in out.targets:
+        assert list(leg.caps_applied) == [c for c in CAP_ORDER if c in leg.caps_applied]
+        assert len(set(leg.caps_applied)) == len(leg.caps_applied)
+
+
 def _book(equity: float, **notional: float) -> Targets:
     """A hand-built ``Targets`` — what the risk supervisor sees after fills."""
     return Targets(
@@ -318,7 +390,7 @@ def _book(equity: float, **notional: float) -> Targets:
 )
 def test_us_t06_ac2_check_caps_names_every_breach(book: dict[str, float], breached: tuple[str, ...]) -> None:
     """``check_caps`` is re-used by the risk supervisor on *filled* positions."""
-    cfg = AppConfig()  # single 0.25, net 1.5, gross 2.5 of E = 10 000 -> 2 500 / 15 000 / 25 000
+    # Limits on E = 10 000: single 2 500, net 3 000, gross 4 500.
     cfg = AppConfig.model_validate({"caps": {"single": 0.25, "net": 0.3, "gross": 0.45}})
     assert check_caps(_book(10_000.0, **book), cfg) == breached
 
@@ -422,14 +494,13 @@ def test_us_t06_ac4_every_intermediate_is_persisted_on_the_result() -> None:
     assert leg.funding_haircut == 0.5
     assert leg.target_notional == pytest.approx(C3_TARGETS["AAAUSDT"] * 0.5, abs=TOL)
     assert leg.target_qty == pytest.approx(leg.target_notional / 50.0, abs=TOL)
-    assert (out.sigma_p, out.conv, out.sigma_eff, out.s, out.g, out.equity) == (
-        out.sigma_p,
-        out.conv,
-        out.sigma_eff,
-        out.s,
-        out.g,
-        out.equity,
-    )
+    # The book-level intermediates are the Appendix C.3 ones: the haircut runs
+    # after them and must not disturb what is persisted for the audit trail.
+    assert out.sigma_p == pytest.approx(C3_SIGMA_P, abs=TOL)
+    assert out.conv == pytest.approx(C3_CONV, abs=TOL)
+    assert out.sigma_eff == pytest.approx(C3_SIGMA_EFF, abs=TOL)
+    assert out.s == pytest.approx(C3_S, abs=TOL)
+    assert (out.g, out.equity) == (C3_G, C3_EQUITY)
 
 
 def test_us_t06_ac4_target_qty_is_zero_without_prices() -> None:

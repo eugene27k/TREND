@@ -153,8 +153,9 @@ class ArchiveLoader:
         months = {m.group(1) for name in prefixes if (m := _MONTH_RE.search(name))}
         return sorted(months)
 
-    def inventory(self, start_month: str, end_month: str,
-                  symbols: Iterable[str] | None = None) -> dict[str, list[str]]:
+    def inventory(
+        self, start_month: str, end_month: str, symbols: Iterable[str] | None = None
+    ) -> dict[str, list[str]]:
         """``{symbol: [months present]}`` clipped to the window (PRD 11.1)."""
         out: dict[str, list[str]] = {}
         for symbol in symbols if symbols is not None else self.symbols():
@@ -205,7 +206,7 @@ def _rows(payload: bytes) -> list[list[str]]:
         raise DataGap(f"unreadable archive member: {exc}") from exc
     rows = list(csv.reader(io.StringIO(text)))
     if rows and rows[0] and not rows[0][0].strip().lstrip("-").replace(".", "", 1).isdigit():
-        rows = rows[1:]          # the archive gained a header row in 2025
+        rows = rows[1:]  # the archive gained a header row in 2025
     return rows
 
 
@@ -215,9 +216,15 @@ def _parse_kline(symbol: str, row: list[str]) -> DailyBar:
     return DailyBar(
         symbol=symbol,
         day=datetime.fromtimestamp(open_ms / 1000, tz=UTC).date(),
-        open=float(row[1]), high=float(row[2]), low=float(row[3]), close=float(row[4]),
-        volume=float(row[5]), quote_volume=float(row[7]),
-        open_time_ms=open_ms, close_time_ms=close_ms, source="archive",
+        open=float(row[1]),
+        high=float(row[2]),
+        low=float(row[3]),
+        close=float(row[4]),
+        volume=float(row[5]),
+        quote_volume=float(row[7]),
+        open_time_ms=open_ms,
+        close_time_ms=close_ms,
+        source="archive",
     )
 
 
@@ -246,7 +253,7 @@ def _parse_listing(body: bytes, prefix: str, *, files: bool) -> tuple[list[str],
         for item in root.findall(f"{ns}CommonPrefixes"):
             value = item.findtext(f"{ns}Prefix") or ""
             last = value
-            trimmed = value[len(prefix):].strip("/")
+            trimmed = value[len(prefix) :].strip("/")
             if trimmed:
                 names.append(trimmed)
     return names, truncated, last

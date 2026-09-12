@@ -46,8 +46,9 @@ class WindowRanking:
         return self.n_params > 0 and self.default_rank <= (self.n_params + 1) // 2
 
 
-def windows(start: date, end: date, *, train_months: int = 12, test_months: int = 6,
-            step_months: int = 6) -> list[Window]:
+def windows(
+    start: date, end: date, *, train_months: int = 12, test_months: int = 6, step_months: int = 6
+) -> list[Window]:
     """Rolling 12-month train / 6-month test windows stepping by 6 months.
 
     The train window carries no information — nothing is fitted — but it is kept
@@ -62,23 +63,33 @@ def windows(start: date, end: date, *, train_months: int = 12, test_months: int 
         test_end = add_months(test_start, test_months)
         if test_start >= end:
             break
-        out.append(Window(
-            name=f"{test_start.isoformat()}..{min(test_end, end).isoformat()}",
-            train_start=train_start, train_end=test_start,
-            test_start=test_start, test_end=min(test_end, end),
-        ))
+        out.append(
+            Window(
+                name=f"{test_start.isoformat()}..{min(test_end, end).isoformat()}",
+                train_start=train_start,
+                train_end=test_start,
+                test_start=test_start,
+                test_end=min(test_end, end),
+            )
+        )
         cursor = add_months(cursor, step_months)
     return out
 
 
-def rank_window(window: Window, run: RunFn,
-                grid: Sequence[tuple[str, dict[str, Any]]] | None = None,
-                default_name: str = DEFAULT_PARAM_SET) -> WindowRanking:
+def rank_window(
+    window: Window,
+    run: RunFn,
+    grid: Sequence[tuple[str, dict[str, Any]]] | None = None,
+    default_name: str = DEFAULT_PARAM_SET,
+) -> WindowRanking:
     """Run every grid point on one test window and rank them by test Sharpe."""
     points = list(grid if grid is not None else parameter_grid())
     scored = [
-        {"param_set": name, "test_sharpe": float(run(name, overrides, window.test_start, window.test_end)),
-         "is_default": name == default_name}
+        {
+            "param_set": name,
+            "test_sharpe": float(run(name, overrides, window.test_start, window.test_end)),
+            "is_default": name == default_name,
+        }
         for name, overrides in points
     ]
     # Ties rank by name so the result is deterministic.
@@ -87,8 +98,9 @@ def rank_window(window: Window, run: RunFn,
         row["rank"] = i
         row["n_params"] = len(scored)
     default_rank = next((r["rank"] for r in scored if r["is_default"]), len(scored))
-    ranking = WindowRanking(window=window.name, rows=tuple(scored),
-                            default_rank=int(default_rank), n_params=len(scored))
+    ranking = WindowRanking(
+        window=window.name, rows=tuple(scored), default_rank=int(default_rank), n_params=len(scored)
+    )
     for row in scored:
         row["window"] = window.name
         row["default_in_top_half"] = ranking.default_in_top_half
@@ -107,8 +119,7 @@ def summary(rankings: Sequence[WindowRanking]) -> dict[str, Any]:
     return {
         "windows": len(rankings),
         "top_half": sum(1 for r in rankings if r.default_in_top_half),
-        "fraction": (sum(1 for r in rankings if r.default_in_top_half) / len(rankings))
-        if rankings else 0.0,
+        "fraction": (sum(1 for r in rankings if r.default_in_top_half) / len(rankings)) if rankings else 0.0,
         "ranks": [r.default_rank for r in rankings],
         "n_params": rankings[0].n_params if rankings else 0,
     }
@@ -118,5 +129,13 @@ def rows_for_storage(rankings: Sequence[WindowRanking]) -> list[dict[str, Any]]:
     return [dict(row) for ranking in rankings for row in ranking.rows]
 
 
-__all__ = ["RunFn", "Window", "WindowRanking", "gate_passes", "rank_window", "rows_for_storage",
-           "summary", "windows"]
+__all__ = [
+    "RunFn",
+    "Window",
+    "WindowRanking",
+    "gate_passes",
+    "rank_window",
+    "rows_for_storage",
+    "summary",
+    "windows",
+]

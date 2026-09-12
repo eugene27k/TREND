@@ -129,8 +129,7 @@ class Simulator:
         # express a 12:00 UTC rebalance, so filling at the same day's close is the
         # nearest honest proxy. Recorded as a limitation rather than hidden.
         self._open: dict[str, dict[date, float]] = {
-            s: {b.day: (b.close if fill_at == "close" else b.open) for b in bl}
-            for s, bl in self.bars.items()
+            s: {b.day: (b.close if fill_at == "close" else b.open) for b in bl} for s, bl in self.bars.items()
         }
         self._days: dict[str, list[date]] = {s: [b.day for b in bl] for s, bl in self.bars.items()}
         self._signals: dict[str, dict[date, SignalResult]] = {}
@@ -156,8 +155,9 @@ class Simulator:
                 rets[days[i]] = math.log(cur / prev) if prev > 0 and cur > 0 else 0.0
             self._returns[symbol] = rets
 
-    def _trailing_returns(self, symbols: Sequence[str], upto: date,
-                          calendar: Sequence[date]) -> dict[str, list[float]]:
+    def _trailing_returns(
+        self, symbols: Sequence[str], upto: date, calendar: Sequence[date]
+    ) -> dict[str, list[float]]:
         window = [d for d in calendar if d <= upto][-COV_WINDOW_DAYS:]
         out: dict[str, list[float]] = {}
         for symbol in symbols:
@@ -190,7 +190,7 @@ class Simulator:
         peak_index = 1.0
         twr_index = 1.0
         prev_equity = self.initial_equity
-        pending: dict[str, float] = {}        # symbol -> target qty, filled at the next open
+        pending: dict[str, float] = {}  # symbol -> target qty, filled at the next open
         funding_cursor = dict.fromkeys(self.funding, 0)
         blocked_until: date | None = None
 
@@ -201,8 +201,9 @@ class Simulator:
             # 1. Execute yesterday's decisions at today's open (11.2).
             day_fees = day_slip = day_traded = 0.0
             if pending and not halted_on:
-                day_fees, day_slip, day_traded = self._fill(book, pending, marks_open, day,
-                                                            open_trades, trades)
+                day_fees, day_slip, day_traded = self._fill(
+                    book, pending, marks_open, day, open_trades, trades
+                )
             pending = {}
 
             marks_close = {s: self._close[s].get(day) for s in self._close}
@@ -220,15 +221,21 @@ class Simulator:
             twr_index *= 1.0 + ret
             peak_index = max(peak_index, twr_index)
             drawdown = max(0.0, 1.0 - twr_index / peak_index) if peak_index > 0 else 0.0
-            equity_path.append({"day": day.isoformat(), "equity": equity, "twr_index": twr_index,
-                                "drawdown": drawdown, "g": g,
-                                "gross": sum(abs(book.qty.get(s, 0.0) * marks_close.get(s, 0.0))
-                                             for s in book.qty),
-                                "net": sum(book.qty.get(s, 0.0) * marks_close.get(s, 0.0)
-                                           for s in book.qty)})
+            equity_path.append(
+                {
+                    "day": day.isoformat(),
+                    "equity": equity,
+                    "twr_index": twr_index,
+                    "drawdown": drawdown,
+                    "g": g,
+                    "gross": sum(abs(book.qty.get(s, 0.0) * marks_close.get(s, 0.0)) for s in book.qty),
+                    "net": sum(book.qty.get(s, 0.0) * marks_close.get(s, 0.0) for s in book.qty),
+                }
+            )
             daily_returns.append(ret)
-            symbol_pnl.extend(self._attribute(day, book, marks_close, day_fees, day_slip,
-                                              day_funding, day_traded))
+            symbol_pnl.extend(
+                self._attribute(day, book, marks_close, day_fees, day_slip, day_funding, day_traded)
+            )
             prev_equity = equity
 
             g_next = governor(drawdown, g, self.cfg.governor)
@@ -238,8 +245,7 @@ class Simulator:
             if not halted_on and drawdown >= self._halt_threshold():
                 halted_on = day
                 if book.qty:
-                    self._fill(book, dict.fromkeys(book.qty, 0.0), marks_close, day,
-                               open_trades, trades)
+                    self._fill(book, dict.fromkeys(book.qty, 0.0), marks_close, day, open_trades, trades)
             if halted_on:
                 continue
 
@@ -249,24 +255,37 @@ class Simulator:
             risk_blocked = blocked_until is not None and day <= blocked_until
             if ret < -self.cfg.risk.daily_loss_block:
                 blocked_until = calendar[min(i + 1, len(calendar) - 1)]
-            pending = self._targets(day, book, marks_close, equity, g, calendar,
-                                    risk_blocked=risk_blocked)
+            pending = self._targets(day, book, marks_close, equity, g, calendar, risk_blocked=risk_blocked)
 
         duration = time.perf_counter() - began
         return BacktestResult(
             run_id=self._run_id(variant, start, end),
-            start_day=start, end_day=end, variant=variant,
-            equity=tuple(equity_path), daily_returns=tuple(daily_returns),
+            start_day=start,
+            end_day=end,
+            variant=variant,
+            equity=tuple(equity_path),
+            daily_returns=tuple(daily_returns),
             metrics=self._metrics(equity_path, daily_returns, book),
-            symbol_pnl=tuple(symbol_pnl), trades=tuple(trades),
-            manifest=self.manifest(start, end, variant), duration_s=duration,
+            symbol_pnl=tuple(symbol_pnl),
+            trades=tuple(trades),
+            manifest=self.manifest(start, end, variant),
+            duration_s=duration,
             halted_on=halted_on,
         )
 
     # -- steps -------------------------------------------------------------- #
 
-    def _targets(self, day: date, book: _Book, marks: Mapping[str, float], equity: float,
-                 g: float, calendar: Sequence[date], *, risk_blocked: bool) -> dict[str, float]:
+    def _targets(
+        self,
+        day: date,
+        book: _Book,
+        marks: Mapping[str, float],
+        equity: float,
+        g: float,
+        calendar: Sequence[date],
+        *,
+        risk_blocked: bool,
+    ) -> dict[str, float]:
         """Target quantities for tomorrow, in the live sizing pipeline's own code."""
         universe = self.universes.get(month_key(day))
         symbols = list(universe.symbols) if universe else []
@@ -285,8 +304,16 @@ class Simulator:
         vols = dict(risk_model.vols)
 
         funding_ann = {s: self._predicted_funding(s, day) for s in symbols}
-        targets = size_targets(signals, vols, risk_model, equity, g, self.cfg,
-                               funding_ann=funding_ann, min_notionals=self.min_notionals)
+        targets = size_targets(
+            signals,
+            vols,
+            risk_model,
+            equity,
+            g,
+            self.cfg,
+            funding_ann=funding_ann,
+            min_notionals=self.min_notionals,
+        )
 
         wanted: dict[str, float] = {}
         by_symbol = targets.by_symbol()
@@ -298,18 +325,23 @@ class Simulator:
             current_notional = book.notional(symbol, marks)
             in_universe = symbol in symbols
             if not in_universe:
-                target_notional = 0.0          # 5.8: always traded to zero
+                target_notional = 0.0  # 5.8: always traded to zero
             if risk_blocked and abs(target_notional) > abs(current_notional):
-                continue                        # blocked: reductions only
-            if not should_trade(target_notional, current_notional, equity,
-                                self.cfg.rebalance, in_universe):
+                continue  # blocked: reductions only
+            if not should_trade(target_notional, current_notional, equity, self.cfg.rebalance, in_universe):
                 continue
             wanted[symbol] = target_notional / price
         return wanted
 
-    def _fill(self, book: _Book, wanted: Mapping[str, float], marks: Mapping[str, float],
-              day: date, open_trades: dict[str, dict[str, Any]],
-              trades: list[dict[str, Any]]) -> tuple[float, float, float]:
+    def _fill(
+        self,
+        book: _Book,
+        wanted: Mapping[str, float],
+        marks: Mapping[str, float],
+        day: date,
+        open_trades: dict[str, dict[str, Any]],
+        trades: list[dict[str, Any]],
+    ) -> tuple[float, float, float]:
         """Fill at ``marks`` with the conservative cost model (Locked Decision 8)."""
         taker = self.cfg.exec.taker_fee_fallback
         fees = slip = traded = 0.0
@@ -336,30 +368,47 @@ class Simulator:
             self._track_trade(symbol, current, target_qty, price, day, open_trades, trades)
         return fees, slip, traded
 
-    def _track_trade(self, symbol: str, before: float, after: float, price: float, day: date,
-                     open_trades: dict[str, dict[str, Any]], trades: list[dict[str, Any]]) -> None:
+    def _track_trade(
+        self,
+        symbol: str,
+        before: float,
+        after: float,
+        price: float,
+        day: date,
+        open_trades: dict[str, dict[str, Any]],
+        trades: list[dict[str, Any]],
+    ) -> None:
         """Open -> flat episodes per symbol (US-T14 AC 4, mirrored in the backtest)."""
         if before == 0.0 and after != 0.0:
             signal = self._signals.get(symbol, {}).get(day)
             open_trades[symbol] = {
-                "symbol": symbol, "side": "long" if after > 0 else "short",
-                "open_day": day.isoformat(), "open_price": price, "qty": after,
-                "entry_signal": signal.signal if signal else 0.0, "mae": 0.0,
+                "symbol": symbol,
+                "side": "long" if after > 0 else "short",
+                "open_day": day.isoformat(),
+                "open_price": price,
+                "qty": after,
+                "entry_signal": signal.signal if signal else 0.0,
+                "mae": 0.0,
             }
         elif before != 0.0 and after == 0.0 and symbol in open_trades:
             trade = open_trades.pop(symbol)
             signal = self._signals.get(symbol, {}).get(day)
             entry_price = float(trade["open_price"])
             qty = float(trade["qty"])
-            trades.append({
-                **trade, "close_day": day.isoformat(), "close_price": price,
-                "days": (day - date.fromisoformat(str(trade["open_day"]))).days,
-                "pnl": qty * (price - entry_price),
-                "exit_signal": signal.signal if signal else 0.0,
-            })
+            trades.append(
+                {
+                    **trade,
+                    "close_day": day.isoformat(),
+                    "close_price": price,
+                    "days": (day - date.fromisoformat(str(trade["open_day"]))).days,
+                    "pnl": qty * (price - entry_price),
+                    "exit_signal": signal.signal if signal else 0.0,
+                }
+            )
 
-    def _settle_funding(self, book: _Book, day: date, cursor: dict[str, int],
-                        marks: Mapping[str, float]) -> float:
+    def _settle_funding(
+        self, book: _Book, day: date, cursor: dict[str, int], marks: Mapping[str, float]
+    ) -> float:
         """Charge every settlement dated ``day`` against the position held."""
         start = to_ms(day)
         end = start + 86_400_000
@@ -396,8 +445,16 @@ class Simulator:
             return 0.0
         return annualise_funding(last.rate, last.interval_hours or self.cfg.funding.default_interval_hours)
 
-    def _attribute(self, day: date, book: _Book, marks: Mapping[str, float], fees: float,
-                   slippage: float, funding: float, traded: float) -> list[dict[str, Any]]:
+    def _attribute(
+        self,
+        day: date,
+        book: _Book,
+        marks: Mapping[str, float],
+        fees: float,
+        slippage: float,
+        funding: float,
+        traded: float,
+    ) -> list[dict[str, Any]]:
         rows = []
         gross = sum(abs(book.qty.get(s, 0.0) * marks.get(s, 0.0)) for s in book.qty) or 1.0
         for symbol, qty in book.qty.items():
@@ -406,14 +463,19 @@ class Simulator:
             notional = qty * marks.get(symbol, 0.0)
             share = abs(notional) / gross
             signal = self._signals.get(symbol, {}).get(day)
-            rows.append({
-                "day": day.isoformat(), "symbol": symbol,
-                "side": "long" if qty > 0 else "short",
-                "avg_notional": notional,
-                "fees": -fees * share, "slippage": -slippage * share,
-                "funding": funding * share, "traded_notional": traded * share,
-                "signal": signal.signal if signal else 0.0,
-            })
+            rows.append(
+                {
+                    "day": day.isoformat(),
+                    "symbol": symbol,
+                    "side": "long" if qty > 0 else "short",
+                    "avg_notional": notional,
+                    "fees": -fees * share,
+                    "slippage": -slippage * share,
+                    "funding": funding * share,
+                    "traded_notional": traded * share,
+                    "signal": signal.signal if signal else 0.0,
+                }
+            )
         return rows
 
     def _halt_threshold(self) -> float:
@@ -421,8 +483,9 @@ class Simulator:
 
     # -- outputs ------------------------------------------------------------ #
 
-    def _metrics(self, equity_path: Sequence[Mapping[str, Any]], returns: Sequence[float],
-                 book: _Book) -> dict[str, float]:
+    def _metrics(
+        self, equity_path: Sequence[Mapping[str, Any]], returns: Sequence[float], book: _Book
+    ) -> dict[str, float]:
         """A small, self-contained metric set. The full Section 10 table is the
         analytics engine's job; these are the numbers the P0 gate reads."""
         if not equity_path:
@@ -460,13 +523,14 @@ class Simulator:
         """Everything needed to reproduce this run bit-for-bit (11.4)."""
         checksums = {
             symbol: hashlib.sha256(
-                json_dumps([[b.day.isoformat(), b.open, b.close, b.quote_volume] for b in bars])
-                .encode()
+                json_dumps([[b.day.isoformat(), b.open, b.close, b.quote_volume] for b in bars]).encode()
             ).hexdigest()[:16]
             for symbol, bars in sorted(self.bars.items())
         }
         return {
-            "start": start.isoformat(), "end": end.isoformat(), "variant": variant,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "variant": variant,
             "initial_equity": self.initial_equity,
             "parameters": self.cfg.parameter_snapshot(),
             "symbols": sorted(self.bars),
@@ -481,17 +545,30 @@ class Simulator:
 
     def _empty(self, start: date, end: date, variant: str, duration: float) -> BacktestResult:
         return BacktestResult(
-            run_id=self._run_id(variant, start, end), start_day=start, end_day=end,
-            variant=variant, equity=(), daily_returns=(), metrics={}, symbol_pnl=(), trades=(),
-            manifest=self.manifest(start, end, variant), duration_s=duration,
+            run_id=self._run_id(variant, start, end),
+            start_day=start,
+            end_day=end,
+            variant=variant,
+            equity=(),
+            daily_returns=(),
+            metrics={},
+            symbol_pnl=(),
+            trades=(),
+            manifest=self.manifest(start, end, variant),
+            duration_s=duration,
         )
 
 
 def equity_points(result: BacktestResult) -> list[EquityPoint]:
     """The result's path as ``EquityPoint``s, for the shared drawdown helpers."""
     return [
-        EquityPoint(ts_ms=to_ms(date.fromisoformat(str(p["day"]))), equity=float(p["equity"]),
-                    net_transfer=0.0, twr_factor=1.0, twr_index=float(p["twr_index"]))
+        EquityPoint(
+            ts_ms=to_ms(date.fromisoformat(str(p["day"]))),
+            equity=float(p["equity"]),
+            net_transfer=0.0,
+            twr_factor=1.0,
+            twr_index=float(p["twr_index"]),
+        )
         for p in result.equity
     ]
 

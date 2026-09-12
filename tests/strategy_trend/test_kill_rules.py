@@ -34,8 +34,9 @@ def _fired(ctx, now_ms=NOW):
 
 
 def _equity(ctx, drawdown: float, equity: float = 10_000.0) -> None:
-    ctx.repos.equity.upsert(DAY, EquityPoint(NOW, equity, 0.0, 1.0, 1.0 - drawdown),
-                            peak_index=1.0, drawdown=drawdown)
+    ctx.repos.equity.upsert(
+        DAY, EquityPoint(NOW, equity, 0.0, 1.0, 1.0 - drawdown), peak_index=1.0, drawdown=drawdown
+    )
 
 
 def _snapshots(ctx, opening: float, latest: float) -> None:
@@ -82,11 +83,19 @@ def test_hard_halt_does_not_fire_just_below_the_threshold(ctx):
 def test_us_t13_ac1_hard_halt_tightens_to_1_5x_the_backtest_max_drawdown(ctx):
     """A strategy whose backtest lost 10 % has no business reaching 25 % unlooked-at."""
     ctx.repos.backtest.save_run(
-        "run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY, variant="default",
-        params={}, manifest={}, git_commit="abc", metrics={"max_drawdown": 0.10}, equity=[],
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={"max_drawdown": 0.10},
+        equity=[],
         duration_s=1.0,
     )
-    _equity(ctx, 0.16)          # below 25 %, but above 1.5 x 10 % = 15 %
+    _equity(ctx, 0.16)  # below 25 %, but above 1.5 x 10 % = 15 %
     action = _fired(ctx)[HARD_HALT]
     assert action.halt
     assert action.context["threshold"] == pytest.approx(0.15)
@@ -94,8 +103,16 @@ def test_us_t13_ac1_hard_halt_tightens_to_1_5x_the_backtest_max_drawdown(ctx):
 
 def test_hard_halt_keeps_the_config_threshold_when_the_backtest_is_worse(ctx):
     ctx.repos.backtest.save_run(
-        "run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY, variant="default",
-        params={}, manifest={}, git_commit="abc", metrics={"max_drawdown": 0.40}, equity=[],
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={"max_drawdown": 0.40},
+        equity=[],
         duration_s=1.0,
     )
     _equity(ctx, 0.26)
@@ -108,7 +125,7 @@ def test_hard_halt_keeps_the_config_threshold_when_the_backtest_is_worse(ctx):
 
 
 def test_us_t13_ac1_daily_loss_over_6_pct_blocks_risk_increasing(ctx):
-    _snapshots(ctx, 10_000.0, 9_300.0)          # -7 %
+    _snapshots(ctx, 10_000.0, 9_300.0)  # -7 %
     action = _fired(ctx)[DAILY_LOSS]
     assert action.block_risk_increasing
     assert not action.flatten and not action.halt
@@ -127,9 +144,9 @@ def test_daily_loss_ignores_a_withdrawal(ctx):
     from aegis.core.types import IncomeType, LedgerEntry, Strategy
 
     _snapshots(ctx, 10_000.0, 9_000.0)
-    ctx.repos.ledger.add_many([
-        LedgerEntry(Strategy.TREND, NOW, IncomeType.TRANSFER, "USDT", -1_000.0, None, "w1")
-    ])
+    ctx.repos.ledger.add_many(
+        [LedgerEntry(Strategy.TREND, NOW, IncomeType.TRANSFER, "USDT", -1_000.0, None, "w1")]
+    )
     assert DAILY_LOSS not in _fired(ctx)
 
 
@@ -153,11 +170,21 @@ def _three_months_of_pnl(ctx, daily: float) -> None:
 
 
 def test_us_t13_ac1_rolling_3m_below_the_bootstrap_p05_blocks_and_warns(ctx):
-    ctx.repos.backtest.save_run("run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY,
-                                variant="default", params={}, manifest={}, git_commit="abc",
-                                metrics={}, equity=[], duration_s=1.0)
+    ctx.repos.backtest.save_run(
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={},
+        equity=[],
+        duration_s=1.0,
+    )
     ctx.repos.backtest.save_bootstrap("run-1", "3m", {5.0: -500.0, 50.0: 300.0})
-    _three_months_of_pnl(ctx, -10.0)            # -900 over the quarter, below p05 of -500
+    _three_months_of_pnl(ctx, -10.0)  # -900 over the quarter, below p05 of -500
     action = _fired(ctx)[BOOTSTRAP_P05]
     assert action.block_risk_increasing and not action.halt
     assert not action.auto_clears, "a post-mortem is an operator action"
@@ -165,25 +192,46 @@ def test_us_t13_ac1_rolling_3m_below_the_bootstrap_p05_blocks_and_warns(ctx):
 
 
 def test_bootstrap_rule_stays_silent_inside_the_expected_distribution(ctx):
-    ctx.repos.backtest.save_run("run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY,
-                                variant="default", params={}, manifest={}, git_commit="abc",
-                                metrics={}, equity=[], duration_s=1.0)
+    ctx.repos.backtest.save_run(
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={},
+        equity=[],
+        duration_s=1.0,
+    )
     ctx.repos.backtest.save_bootstrap("run-1", "3m", {5.0: -500.0})
-    _three_months_of_pnl(ctx, -1.0)             # -90: a bad quarter, but a normal one
+    _three_months_of_pnl(ctx, -1.0)  # -90: a bad quarter, but a normal one
     assert BOOTSTRAP_P05 not in _fired(ctx)
 
 
 def test_bootstrap_rule_waits_for_three_months_of_evidence(ctx):
     from datetime import date, timedelta
 
-    ctx.repos.backtest.save_run("run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY,
-                                variant="default", params={}, manifest={}, git_commit="abc",
-                                metrics={}, equity=[], duration_s=1.0)
+    ctx.repos.backtest.save_run(
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={},
+        equity=[],
+        duration_s=1.0,
+    )
     ctx.repos.backtest.save_bootstrap("run-1", "3m", {5.0: -10.0})
     start = date(2026, 8, 25)
     for i in range(14):
-        ctx.repos.symbol_pnl.upsert_many(start + timedelta(days=i),
-                                         [{"symbol": "BTCUSDT", "side": "long", "net_pnl": -100.0}])
+        ctx.repos.symbol_pnl.upsert_many(
+            start + timedelta(days=i), [{"symbol": "BTCUSDT", "side": "long", "net_pnl": -100.0}]
+        )
     assert BOOTSTRAP_P05 not in _fired(ctx), "14 days is not evidence of a broken strategy"
 
 
@@ -193,8 +241,9 @@ def test_bootstrap_rule_waits_for_three_months_of_evidence(ctx):
 
 
 def test_us_t13_ac1_tracking_bounds_breached_14_days_blocks(ctx):
-    ctx.repos.tracking.upsert(DAY, live_pnl=0.0, ref_pnl=0.0, cum_live=0.0, cum_ref=0.0,
-                              in_bounds=False, breach_days=14)
+    ctx.repos.tracking.upsert(
+        DAY, live_pnl=0.0, ref_pnl=0.0, cum_live=0.0, cum_ref=0.0, in_bounds=False, breach_days=14
+    )
     action = _fired(ctx)[TRACKING_ERROR]
     assert action.block_risk_increasing and not action.auto_clears
 
@@ -207,9 +256,17 @@ def test_tracking_rule_does_not_fire_at_13_days(ctx):
 def test_us_t13_ac1_three_failed_rebalances_are_critical(ctx):
     for i, day in enumerate(("2026-09-06", "2026-09-07", "2026-09-08")):
         ctx.repos.rebalances.create(f"rb-{i}", day, NOW - (3 - i) * DAY_MS)
-        ctx.repos.rebalances.finish(f"rb-{i}", ended_ts=NOW, status="window_end",
-                                    completion_pct=40.0, traded_notional=0.0, fees=0.0,
-                                    avg_slippage_bps=0.0, maker_ratio=0.0, residuals=[])
+        ctx.repos.rebalances.finish(
+            f"rb-{i}",
+            ended_ts=NOW,
+            status="window_end",
+            completion_pct=40.0,
+            traded_notional=0.0,
+            fees=0.0,
+            avg_slippage_bps=0.0,
+            maker_ratio=0.0,
+            residuals=[],
+        )
     action = _fired(ctx)[REBALANCE_FAILURE]
     assert action.severity is Severity.CRITICAL
     assert action.block_risk_increasing
@@ -218,21 +275,31 @@ def test_us_t13_ac1_three_failed_rebalances_are_critical(ctx):
 def test_a_good_rebalance_breaks_the_failure_streak(ctx):
     for i, (day, pct) in enumerate((("2026-09-06", 40.0), ("2026-09-07", 99.0), ("2026-09-08", 40.0))):
         ctx.repos.rebalances.create(f"rb-{i}", day, NOW - (3 - i) * DAY_MS)
-        ctx.repos.rebalances.finish(f"rb-{i}", ended_ts=NOW, status="complete", completion_pct=pct,
-                                    traded_notional=0.0, fees=0.0, avg_slippage_bps=0.0,
-                                    maker_ratio=0.0, residuals=[])
+        ctx.repos.rebalances.finish(
+            f"rb-{i}",
+            ended_ts=NOW,
+            status="complete",
+            completion_pct=pct,
+            traded_notional=0.0,
+            fees=0.0,
+            avg_slippage_bps=0.0,
+            maker_ratio=0.0,
+            residuals=[],
+        )
     assert REBALANCE_FAILURE not in _fired(ctx)
 
 
 def test_us_t13_ac1_an_open_reconciliation_break_blocks_and_escalates_after_60_min(ctx):
-    ctx.repos.reconciliations.add(NOW - 10 * 60_000, "positions", False, "qty mismatch",
-                                  [{"symbol": "BTCUSDT"}])
+    ctx.repos.reconciliations.add(
+        NOW - 10 * 60_000, "positions", False, "qty mismatch", [{"symbol": "BTCUSDT"}]
+    )
     fresh = _fired(ctx)[RECONCILIATION]
     assert fresh.severity is Severity.WARN
     assert fresh.block_risk_increasing
 
-    ctx.repos.reconciliations.add(NOW - 90 * 60_000, "positions", False, "qty mismatch",
-                                  [{"symbol": "ETHUSDT"}])
+    ctx.repos.reconciliations.add(
+        NOW - 90 * 60_000, "positions", False, "qty mismatch", [{"symbol": "ETHUSDT"}]
+    )
     aged = _fired(ctx)[RECONCILIATION]
     assert aged.severity is Severity.CRITICAL
 
@@ -256,12 +323,30 @@ def test_us_t13_ac4_the_chaos_suite_can_force_every_rule_at_once(ctx):
     ctx.repos.reconciliations.add(NOW - 120 * 60_000, "positions", False, "x", [])
     for i, day in enumerate(("2026-09-06", "2026-09-07", "2026-09-08")):
         ctx.repos.rebalances.create(f"rb-{i}", day, NOW - (3 - i) * DAY_MS)
-        ctx.repos.rebalances.finish(f"rb-{i}", ended_ts=NOW, status="window_end",
-                                    completion_pct=10.0, traded_notional=0.0, fees=0.0,
-                                    avg_slippage_bps=0.0, maker_ratio=0.0, residuals=[])
-    ctx.repos.backtest.save_run("run-1", created_ts=NOW, start_day="2021-01-01", end_day=DAY,
-                                variant="default", params={}, manifest={}, git_commit="abc",
-                                metrics={}, equity=[], duration_s=1.0)
+        ctx.repos.rebalances.finish(
+            f"rb-{i}",
+            ended_ts=NOW,
+            status="window_end",
+            completion_pct=10.0,
+            traded_notional=0.0,
+            fees=0.0,
+            avg_slippage_bps=0.0,
+            maker_ratio=0.0,
+            residuals=[],
+        )
+    ctx.repos.backtest.save_run(
+        "run-1",
+        created_ts=NOW,
+        start_day="2021-01-01",
+        end_day=DAY,
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="abc",
+        metrics={},
+        equity=[],
+        duration_s=1.0,
+    )
     ctx.repos.backtest.save_bootstrap("run-1", "3m", {5.0: -100.0})
     _three_months_of_pnl(ctx, -50.0)
 

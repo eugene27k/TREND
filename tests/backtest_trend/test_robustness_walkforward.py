@@ -16,10 +16,21 @@ class FakeResult:
 
 def test_every_prd_11_5_variant_is_present():
     names = set(rb.VARIANTS)
-    for expected in ("speeds_fast", "speeds_slow", "sigma_asset_down", "sigma_asset_up",
-                     "sigma_portfolio_down", "sigma_portfolio_up", "hysteresis_5",
-                     "hysteresis_20", "universe_12", "universe_20", "cost_x2",
-                     "governor_off", "rebalance_midday"):
+    for expected in (
+        "speeds_fast",
+        "speeds_slow",
+        "sigma_asset_down",
+        "sigma_asset_up",
+        "sigma_portfolio_down",
+        "sigma_portfolio_up",
+        "hysteresis_5",
+        "hysteresis_20",
+        "universe_12",
+        "universe_20",
+        "cost_x2",
+        "governor_off",
+        "rebalance_midday",
+    ):
         assert expected in names, expected
 
 
@@ -27,16 +38,16 @@ def test_variants_produce_the_documented_parameter_changes(bt_cfg):
     by_name = {n: (c, o) for n, c, o in rb.variant_configs(bt_cfg)}
     assert by_name["speeds_fast"][0].signal.pairs == ((4, 12), (8, 24), (16, 48))
     assert by_name["speeds_slow"][0].signal.pairs == ((16, 48), (32, 96), (64, 192))
-    assert by_name["sigma_asset_down"][0].sizing.sigma_target_asset == 0.175       # -30 %
-    assert by_name["sigma_asset_up"][0].sizing.sigma_target_asset == 0.325         # +30 %
+    assert by_name["sigma_asset_down"][0].sizing.sigma_target_asset == 0.175  # -30 %
+    assert by_name["sigma_asset_up"][0].sizing.sigma_target_asset == 0.325  # +30 %
     assert by_name["sigma_portfolio_down"][0].sizing.sigma_target_portfolio == 0.14
     assert by_name["sigma_portfolio_up"][0].sizing.sigma_target_portfolio == 0.26
     assert by_name["hysteresis_5"][0].rebalance.hysteresis_frac == 0.05
     assert by_name["hysteresis_20"][0].rebalance.hysteresis_frac == 0.20
     assert by_name["universe_12"][0].universe.size == 12
     assert by_name["universe_20"][0].universe.size == 20
-    assert by_name["cost_x2"][0].exec.slippage_for("BTCUSDT") == 4.0               # 2 x 2 bps
-    assert by_name["cost_x2"][0].exec.slippage_for("SOLUSDT") == 12.0              # 2 x 6 bps
+    assert by_name["cost_x2"][0].exec.slippage_for("BTCUSDT") == 4.0  # 2 x 2 bps
+    assert by_name["cost_x2"][0].exec.slippage_for("SOLUSDT") == 12.0  # 2 x 6 bps
     assert by_name["governor_off"][0].governor.down == {}
     assert by_name["rebalance_midday"][1] == {"fill_at": "close"}
 
@@ -84,7 +95,10 @@ def test_the_walkforward_grid_is_the_documented_3x3x3():
 def test_windows_roll_12_month_train_and_6_month_test_by_6_months():
     ws = wf.windows(date(2021, 1, 1), date(2024, 1, 1))
     assert [w.name for w in ws][:3] == [
-        "2022-01-01..2022-07-01", "2022-07-01..2023-01-01", "2023-01-01..2023-07-01"]
+        "2022-01-01..2022-07-01",
+        "2022-07-01..2023-01-01",
+        "2023-01-01..2023-07-01",
+    ]
     for w in ws:
         assert (w.test_start - w.train_start).days >= 364
         assert w.test_end > w.test_start

@@ -33,8 +33,9 @@ from aegis.storage.repositories import BacktestRepo
 
 def git_commit(cwd: str | None = None) -> str:
     try:
-        out = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True,
-                             timeout=10, cwd=cwd, check=False)
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10, cwd=cwd, check=False
+        )
         return out.stdout.strip() if out.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         return ""
@@ -65,9 +66,7 @@ class BacktestRunner:
         self.funding = dict(funding)
         self.initial_equity = initial_equity
         self.repo = repo
-        self.inventory = {
-            s: sorted({month_key(b.day) for b in bl}) for s, bl in self.bars.items()
-        }
+        self.inventory = {s: sorted({month_key(b.day) for b in bl}) for s, bl in self.bars.items()}
 
     # -- pieces ------------------------------------------------------------- #
 
@@ -75,22 +74,39 @@ class BacktestRunner:
         months = months_between(month_key(start), month_key(end))
         return PointInTimeUniverse(self.inventory, self.bars, cfg.universe).build(months)
 
-    def simulate(self, cfg: AppConfig, start: date, end: date, *, variant: str = "default",
-                 options: Mapping[str, Any] | None = None) -> BacktestResult:
-        sim = Simulator(cfg, self.bars, self.funding, self.universes(cfg, start, end),
-                        initial_equity=self.initial_equity,
-                        fill_at=str((options or {}).get("fill_at", "open")))
+    def simulate(
+        self,
+        cfg: AppConfig,
+        start: date,
+        end: date,
+        *,
+        variant: str = "default",
+        options: Mapping[str, Any] | None = None,
+    ) -> BacktestResult:
+        sim = Simulator(
+            cfg,
+            self.bars,
+            self.funding,
+            self.universes(cfg, start, end),
+            initial_equity=self.initial_equity,
+            fill_at=str((options or {}).get("fill_at", "open")),
+        )
         return sim.run(start, end, variant=variant)
 
-    def run_robustness(self, start: date, end: date) -> tuple[dict[str, BacktestResult], list[rb.RobustnessRow]]:
+    def run_robustness(
+        self, start: date, end: date
+    ) -> tuple[dict[str, BacktestResult], list[rb.RobustnessRow]]:
         results: dict[str, BacktestResult] = {}
         for name, variant_cfg, options in rb.variant_configs(self.cfg):
             results[name] = self.simulate(variant_cfg, start, end, variant=name, options=options)
         return results, rb.evaluate(results)
 
-    def run_walkforward(self, start: date, end: date,
-                        grid: Sequence[tuple[str, dict[str, Any]]] | None = None,
-                        ) -> list[wf.WindowRanking]:
+    def run_walkforward(
+        self,
+        start: date,
+        end: date,
+        grid: Sequence[tuple[str, dict[str, Any]]] | None = None,
+    ) -> list[wf.WindowRanking]:
         points = list(grid if grid is not None else rb.parameter_grid())
 
         def run(_name: str, overrides: dict[str, Any], test_start: date, test_end: date) -> float:
@@ -100,17 +116,26 @@ class BacktestRunner:
 
         return [
             wf.rank_window(window, run, points)
-            for window in wf.windows(start, end,
-                                     train_months=self.cfg.backtest.walkforward_train_months,
-                                     test_months=self.cfg.backtest.walkforward_test_months,
-                                     step_months=self.cfg.backtest.walkforward_step_months)
+            for window in wf.windows(
+                start,
+                end,
+                train_months=self.cfg.backtest.walkforward_train_months,
+                test_months=self.cfg.backtest.walkforward_test_months,
+                step_months=self.cfg.backtest.walkforward_step_months,
+            )
         ]
 
     # -- the whole thing ---------------------------------------------------- #
 
-    def run(self, start: date, end: date, *, with_robustness: bool = True,
-            with_walkforward: bool = True,
-            walkforward_grid: Sequence[tuple[str, dict[str, Any]]] | None = None) -> RunOutcome:
+    def run(
+        self,
+        start: date,
+        end: date,
+        *,
+        with_robustness: bool = True,
+        with_walkforward: bool = True,
+        walkforward_grid: Sequence[tuple[str, dict[str, Any]]] | None = None,
+    ) -> RunOutcome:
         base = self.simulate(self.cfg, start, end)
 
         rows: list[rb.RobustnessRow] = []
@@ -123,9 +148,12 @@ class BacktestRunner:
 
         bt = self.cfg.backtest
         distribution = block_bootstrap(
-            base.daily_returns, horizon_days=bt.bootstrap_block_days,
-            block_days=bt.bootstrap_block_days, resamples=bt.bootstrap_resamples,
-            seed=bt.bootstrap_seed, starting_equity=self.initial_equity,
+            base.daily_returns,
+            horizon_days=bt.bootstrap_block_days,
+            block_days=bt.bootstrap_block_days,
+            resamples=bt.bootstrap_resamples,
+            seed=bt.bootstrap_seed,
+            starting_equity=self.initial_equity,
         )
         contribution = self._contribution(base)
         evidence = self._p0_evidence(base, rows, rankings, contribution)
@@ -157,9 +185,13 @@ class BacktestRunner:
             by_year[year] = (first, equity)
         return {y: last - first for y, (first, last) in by_year.items()}
 
-    def _p0_evidence(self, base: BacktestResult, rows: Sequence[rb.RobustnessRow],
-                     rankings: Sequence[wf.WindowRanking],
-                     contribution: Mapping[str, float]) -> dict[str, Any]:
+    def _p0_evidence(
+        self,
+        base: BacktestResult,
+        rows: Sequence[rb.RobustnessRow],
+        rankings: Sequence[wf.WindowRanking],
+        contribution: Mapping[str, float],
+    ) -> dict[str, Any]:
         """Every P0 criterion with its measured value (Section 7). Judging is ops.phases' job."""
         metrics = base.metrics
         yearly = self._yearly_pnl(base)
@@ -176,23 +208,34 @@ class BacktestRunner:
             "robustness_failures": [r.variant for r in rows if r.is_gate and not r.sign_ok],
             "turnover_annualised": metrics.get("turnover_annualised"),
             "walkforward": wf.summary(list(rankings)) if rankings else None,
-            "walkforward_ok": wf.gate_passes(list(rankings),
-                                             self.cfg.backtest.walkforward_top_half_frac)
-            if rankings else None,
+            "walkforward_ok": wf.gate_passes(list(rankings), self.cfg.backtest.walkforward_top_half_frac)
+            if rankings
+            else None,
             "halted_on": base.halted_on.isoformat() if base.halted_on else None,
         }
 
-    def _persist(self, base: BacktestResult, rows: Sequence[rb.RobustnessRow],
-                 rankings: Sequence[wf.WindowRanking], distribution: dict[float, float],
-                 evidence: dict[str, Any]) -> None:
+    def _persist(
+        self,
+        base: BacktestResult,
+        rows: Sequence[rb.RobustnessRow],
+        rankings: Sequence[wf.WindowRanking],
+        distribution: dict[float, float],
+        evidence: dict[str, Any],
+    ) -> None:
         assert self.repo is not None
         metrics = dict(base.metrics)
         metrics["p0_evidence"] = evidence  # type: ignore[assignment]
         self.repo.save_run(
-            base.run_id, created_ts=0, start_day=base.start_day.isoformat(),
-            end_day=base.end_day.isoformat(), variant=base.variant,
-            params=self.cfg.parameter_snapshot(), manifest=base.manifest,
-            git_commit=git_commit(), metrics=metrics, equity=base.equity,
+            base.run_id,
+            created_ts=0,
+            start_day=base.start_day.isoformat(),
+            end_day=base.end_day.isoformat(),
+            variant=base.variant,
+            params=self.cfg.parameter_snapshot(),
+            manifest=base.manifest,
+            git_commit=git_commit(),
+            metrics=metrics,
+            equity=base.equity,
             duration_s=base.duration_s,
         )
         if rows:

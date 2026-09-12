@@ -30,8 +30,12 @@ VARIANTS: dict[str, dict[str, Any]] = {
     "hysteresis_20": {"rebalance": {"hysteresis_frac": 0.20}},
     "universe_12": {"universe": {"size": 12}},
     "universe_20": {"universe": {"size": 20}},
-    "cost_x2": {"exec": {"slippage_bps": {"BTCUSDT": 4.0, "ETHUSDT": 4.0, "default": 12.0},
-                         "taker_fee_fallback": 0.001}},
+    "cost_x2": {
+        "exec": {
+            "slippage_bps": {"BTCUSDT": 4.0, "ETHUSDT": 4.0, "default": 12.0},
+            "taker_fee_fallback": 0.001,
+        }
+    },
     "governor_off": {"governor": {"down": {}, "up": {}}},
     "rebalance_midday": {"_fill_at": "close"},
 }
@@ -69,8 +73,14 @@ class RobustnessRow:
     detail: dict[str, Any] | None = None
 
     def as_row(self) -> dict[str, Any]:
-        return {"variant": self.variant, "net_pnl": self.net_pnl, "sharpe": self.sharpe,
-                "max_dd": self.max_dd, "sign_ok": self.sign_ok, "detail": self.detail or {}}
+        return {
+            "variant": self.variant,
+            "net_pnl": self.net_pnl,
+            "sharpe": self.sharpe,
+            "max_dd": self.max_dd,
+            "sign_ok": self.sign_ok,
+            "detail": self.detail or {},
+        }
 
 
 def evaluate(results: dict[str, Any], baseline: str = "default") -> list[RobustnessRow]:
@@ -80,13 +90,16 @@ def evaluate(results: dict[str, Any], baseline: str = "default") -> list[Robustn
     rows: list[RobustnessRow] = []
     for name, result in results.items():
         pnl = float(result.metrics.get("net_pnl", 0.0))
-        rows.append(RobustnessRow(
-            variant=name, net_pnl=pnl,
-            sharpe=float(result.metrics.get("sharpe", 0.0)),
-            max_dd=float(result.metrics.get("max_drawdown", 0.0)),
-            sign_ok=(name == baseline) or (_sign(pnl) == base_sign),
-            is_gate=name not in NOT_A_GATE,
-        ))
+        rows.append(
+            RobustnessRow(
+                variant=name,
+                net_pnl=pnl,
+                sharpe=float(result.metrics.get("sharpe", 0.0)),
+                max_dd=float(result.metrics.get("max_drawdown", 0.0)),
+                sign_ok=(name == baseline) or (_sign(pnl) == base_sign),
+                is_gate=name not in NOT_A_GATE,
+            )
+        )
     return sorted(rows, key=lambda r: r.variant)
 
 
@@ -119,17 +132,30 @@ def parameter_grid() -> list[tuple[str, dict[str, Any]]]:
     for speed_name, pairs in GRID_SPEEDS.items():
         for sigma in GRID_SIGMA:
             for hyst in GRID_HYSTERESIS:
-                out.append((
-                    f"{speed_name}|{sigma:.2f}|{hyst:.2f}",
-                    {"signal": {"pairs": pairs},
-                     "sizing": {"sigma_target_asset": sigma},
-                     "rebalance": {"hysteresis_frac": hyst}},
-                ))
+                out.append(
+                    (
+                        f"{speed_name}|{sigma:.2f}|{hyst:.2f}",
+                        {
+                            "signal": {"pairs": pairs},
+                            "sizing": {"sigma_target_asset": sigma},
+                            "rebalance": {"hysteresis_frac": hyst},
+                        },
+                    )
+                )
     return out
 
 
 __all__ = [
-    "DEFAULT_PARAM_SET", "GRID_HYSTERESIS", "GRID_SIGMA", "GRID_SPEEDS", "NOT_A_GATE",
-    "VARIANTS", "RobustnessRow", "apply_overrides", "evaluate", "gate_passes",
-    "parameter_grid", "variant_configs",
+    "DEFAULT_PARAM_SET",
+    "GRID_HYSTERESIS",
+    "GRID_SIGMA",
+    "GRID_SPEEDS",
+    "NOT_A_GATE",
+    "VARIANTS",
+    "RobustnessRow",
+    "apply_overrides",
+    "evaluate",
+    "gate_passes",
+    "parameter_grid",
+    "variant_configs",
 ]

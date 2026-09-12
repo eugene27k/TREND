@@ -57,12 +57,18 @@ def loader(tmp_path):
         if "BTCUSDT-fundingRate-2022-01.zip" in url:
             return _zip(FUNDING)
         if "prefix=data/futures/um/monthly/klines/BTCUSDT/1d/" in url:
-            return _listing([], keys=["data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-01.zip",
-                                      "data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-02.zip",
-                                      "data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-01.zip.CHECKSUM"])
+            return _listing(
+                [],
+                keys=[
+                    "data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-01.zip",
+                    "data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-02.zip",
+                    "data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-01.zip.CHECKSUM",
+                ],
+            )
         if "prefix=data/futures/um/monthly/klines/" in url:
-            return _listing(["data/futures/um/monthly/klines/BTCUSDT/",
-                             "data/futures/um/monthly/klines/DEADUSDT/"])
+            return _listing(
+                ["data/futures/um/monthly/klines/BTCUSDT/", "data/futures/um/monthly/klines/DEADUSDT/"]
+            )
         raise FileNotFoundError(url)
 
     ld = ArchiveLoader(tmp_path, fetcher=fetch)
@@ -72,10 +78,12 @@ def loader(tmp_path):
 
 def test_url_layout_matches_the_binance_archive():
     assert ArchiveFile("BTCUSDT", "2022-03", "klines").url == (
-        "https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-03.zip")
+        "https://data.binance.vision/data/futures/um/monthly/klines/BTCUSDT/1d/BTCUSDT-1d-2022-03.zip"
+    )
     assert ArchiveFile("BTCUSDT", "2022-03", "fundingRate").url == (
         "https://data.binance.vision/data/futures/um/monthly/fundingRate/BTCUSDT/"
-        "BTCUSDT-fundingRate-2022-03.zip")
+        "BTCUSDT-fundingRate-2022-03.zip"
+    )
 
 
 def test_daily_bars_are_parsed_with_quote_volume_from_field_7(loader):
@@ -87,8 +95,20 @@ def test_daily_bars_are_parsed_with_quote_volume_from_field_7(loader):
 
 
 def test_a_header_row_is_skipped(tmp_path):
-    header = ["open_time", "open", "high", "low", "close", "volume", "close_time",
-              "quote_volume", "count", "taker_buy_volume", "taker_buy_quote_volume", "ignore"]
+    header = [
+        "open_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+        "close_time",
+        "quote_volume",
+        "count",
+        "taker_buy_volume",
+        "taker_buy_quote_volume",
+        "ignore",
+    ]
     ld = ArchiveLoader(tmp_path, fetcher=lambda url: _zip(KLINES, header=header))
     assert len(ld.daily_bars("BTCUSDT", "2022-01")) == 2
 
@@ -116,9 +136,11 @@ def test_downloads_are_cached_on_disk(loader, tmp_path):
     fetches = len(loader.calls)
     loader.daily_bars("BTCUSDT", "2022-01")
     assert len(loader.calls) == fetches, "a cached month must not be re-fetched"
+
     # A brand-new loader over the same cache also stays offline.
     def explode(url: str) -> bytes:
         raise AssertionError(f"should not fetch {url}")
+
     assert len(ArchiveLoader(tmp_path, fetcher=explode).daily_bars("BTCUSDT", "2022-01")) == 2
 
 

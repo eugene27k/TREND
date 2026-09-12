@@ -8,7 +8,7 @@ import pytest
 
 from aegis.backtest_trend.runner import BacktestRunner
 from aegis.core.types import Strategy
-from aegis.storage.db import open_db, json_loads
+from aegis.storage.db import json_loads, open_db
 from aegis.storage.repositories import Repositories
 from tests.backtest_trend.conftest import DAYS, START
 
@@ -19,12 +19,22 @@ SHORT_END = WARM + timedelta(days=200)
 #: A 3-point grid keeps the walk-forward test fast; the real grid has 27 points.
 TINY_GRID = [
     ("default|0.25|0.10", {}),
-    ("fast|0.20|0.05", {"signal": {"pairs": ((4, 12), (8, 24), (16, 48))},
-                        "sizing": {"sigma_target_asset": 0.20},
-                        "rebalance": {"hysteresis_frac": 0.05}}),
-    ("slow|0.30|0.20", {"signal": {"pairs": ((16, 48), (32, 96), (64, 192))},
-                        "sizing": {"sigma_target_asset": 0.30},
-                        "rebalance": {"hysteresis_frac": 0.20}}),
+    (
+        "fast|0.20|0.05",
+        {
+            "signal": {"pairs": ((4, 12), (8, 24), (16, 48))},
+            "sizing": {"sigma_target_asset": 0.20},
+            "rebalance": {"hysteresis_frac": 0.05},
+        },
+    ),
+    (
+        "slow|0.30|0.20",
+        {
+            "signal": {"pairs": ((16, 48), (32, 96), (64, 192))},
+            "sizing": {"sigma_target_asset": 0.30},
+            "rebalance": {"hysteresis_frac": 0.20},
+        },
+    ),
 ]
 
 
@@ -38,17 +48,24 @@ def repos():
 @pytest.fixture(scope="module")
 def outcome(bt_cfg, market):
     bars, funding, _ = market
-    cfg = bt_cfg.model_copy(update={
-        "backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 2_000})
-    })
+    cfg = bt_cfg.model_copy(
+        update={"backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 2_000})}
+    )
     runner = BacktestRunner(cfg, bars, funding, initial_equity=10_000.0)
     return runner.run(WARM, SHORT_END, with_walkforward=False)
 
 
 def test_the_run_produces_every_piece_of_p0_evidence(outcome):
     e = outcome.p0_evidence
-    for key in ("annualised_return", "sharpe", "max_drawdown", "positive_year_fraction",
-                "max_symbol_contribution", "robustness_sign_ok", "turnover_annualised"):
+    for key in (
+        "annualised_return",
+        "sharpe",
+        "max_drawdown",
+        "positive_year_fraction",
+        "max_symbol_contribution",
+        "robustness_sign_ok",
+        "turnover_annualised",
+    ):
         assert key in e, key
         assert e[key] is not None, key
 
@@ -72,9 +89,9 @@ def test_contribution_shares_sum_to_one(outcome):
 
 def test_the_run_persists_everything_under_one_run_id(bt_cfg, market, repos):
     bars, funding, _ = market
-    cfg = bt_cfg.model_copy(update={
-        "backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 500})
-    })
+    cfg = bt_cfg.model_copy(
+        update={"backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 500})}
+    )
     runner = BacktestRunner(cfg, bars, funding, repo=repos.backtest)
     out = runner.run(WARM, WARM + timedelta(days=120), with_walkforward=False)
 
@@ -89,9 +106,9 @@ def test_the_run_persists_everything_under_one_run_id(bt_cfg, market, repos):
 
 def test_walkforward_rows_are_stored_and_rank_the_default(bt_cfg, market, repos):
     bars, funding, _ = market
-    cfg = bt_cfg.model_copy(update={
-        "backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 200})
-    })
+    cfg = bt_cfg.model_copy(
+        update={"backtest": bt_cfg.backtest.model_copy(update={"bootstrap_resamples": 200})}
+    )
     runner = BacktestRunner(cfg, bars, funding, repo=repos.backtest)
     out = runner.run(WARM, END, with_robustness=False, walkforward_grid=TINY_GRID)
 
