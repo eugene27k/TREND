@@ -7,14 +7,13 @@ default.
 
 from __future__ import annotations
 
-import pytest
-
 from datetime import date
+
+import pytest
 
 from aegis.core.clock import DAY_MS, day_of, to_ms
 from aegis.core.context import Context
 from aegis.core.types import EquityPoint, MetricValue, Phase, Strategy
-from aegis.ops.alerts import AlertBus
 from aegis.ops.phases import GateResult, PhaseGates
 from aegis.storage.db import json_loads
 

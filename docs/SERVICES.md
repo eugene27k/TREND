@@ -247,5 +247,21 @@ Fills at the next daily open with the conservative cost model (taker fee +
 
 FastAPI, **read-only** over the SQLite files (the engine writes; the API never does),
 except the `/controls` endpoints which append to `control_log` for the engine to pick up.
+
+**The controls contract.** `POST /api/{strategy}/controls` must do exactly one thing:
+
+```python
+repos.state.log_control(action, operator, reason, {"source": "api", "confirm": confirm}, now_ms)
+```
+
+It must NOT touch `engine_state`, and it must not validate the confirmation token
+— the engine does that, so the check lives in one place. `"source": "api"` is what
+marks the row as a *command*: the engine skips rows without it, because `Controls`
+writes its own audit row for every action it applies and replaying those would
+loop forever. The engine drains rows with `repos.state.controls_after(last_id)` at
+the top of each tick, applies each exactly once, and records the last applied id in
+`engine_state.context["last_control_id"]`. A refused action (bad token, missing
+reason, unknown verb) raises an `AegisError`, is alerted as `CONTROL_REFUSED`, and
+changes nothing.
 Routes are under `/api/{strategy}/...` and every page of US-T18 must be servable from
 stored data alone, in < 1 s.

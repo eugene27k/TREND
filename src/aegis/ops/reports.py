@@ -139,7 +139,7 @@ class Reporter:
 
         lines = [
             f"{self.prefix}{SEP}{DAILY}{SEP}{day.isoformat()}",
-            self._equity_line(day, equity, equity_row, end_ms),
+            self._equity_line(equity, equity_row, end_ms),
             self._pnl_line(day),
             self._exposure_line(day, snapshot, equity),
             self._vol_line(),
@@ -597,7 +597,7 @@ def month_bounds(key: str) -> tuple[date, date]:
 def _week_send(day_in_week: date, weekly_dow: int) -> tuple[str, date]:
     """The week containing ``day_in_week`` and the day its report may be sent."""
     key = week_key_of(day_in_week)
-    start, end = week_bounds(key)
+    _, end = week_bounds(key)
     return key, end + timedelta(days=1 + (weekly_dow % 7))
 
 

@@ -87,3 +87,53 @@ def test_a_sink_without_a_chat_id_is_disabled() -> None:
     poster = _Poster()
     assert TelegramSink(_cfg(chat_id=""), poster)(_alert()) is False
     assert poster.sent == []
+
+
+def test_the_default_poster_calls_send_message_and_reads_the_ok_flag(monkeypatch) -> None:
+    import aegis.ops.telegram as tg
+
+    seen: list[tuple[str, bytes]] = []
+
+    class _Response:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return self.payload
+
+    def fake_urlopen(url, data=None, timeout=0):
+        seen.append((url, data))
+        return _Response(b'{"ok": true}')
+
+    monkeypatch.setattr(tg.urllib.request, "urlopen", fake_urlopen)
+    poster = tg.make_poster("TOKEN", base="https://tg.example")
+
+    assert poster("hello", "-100") is True
+    assert seen[0][0] == "https://tg.example/botTOKEN/sendMessage"
+    assert b"chat_id=-100" in seen[0][1]
+
+
+def test_the_default_poster_returns_false_when_telegram_is_unreachable(monkeypatch) -> None:
+    import aegis.ops.telegram as tg
+
+    def explode(url, data=None, timeout=0):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(tg.urllib.request, "urlopen", explode)
+
+    assert tg.make_poster("TOKEN")("hello", "-100") is False
+
+
+def test_a_sink_built_from_the_app_config_uses_its_telegram_section() -> None:
+    poster = _Poster()
+    sink = TelegramSink(_cfg(), poster)
+
+    assert sink.enabled is True
+    assert sink(_alert(Severity.CRITICAL, "HARD_HALT_DRAWDOWN", "flattening")) is True
+    assert poster.sent[0][0].startswith("TREND · CRITICAL · HARD_HALT_DRAWDOWN")

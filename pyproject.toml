@@ -64,6 +64,10 @@ ignore = ["E501", "B008", "RUF012", "SIM108", "RET504"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "B011"]
+# PRD Appendix D specifies U+2212 MINUS SIGN, U+00B7 MIDDLE DOT and U+00D7
+# MULTIPLICATION SIGN in the Telegram message formats. They are the spec, not typos.
+"src/aegis/ops/reports.py" = ["RUF001", "RUF002"]
+"tests/ops/test_reports.py" = ["RUF001", "RUF002"]
 
 [tool.mypy]
 python_version = "3.12"

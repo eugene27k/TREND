@@ -552,3 +552,91 @@ def test_a_gateway_that_ignores_the_start_window_still_books_funding_once(
     gw.poll()
     gw.poll()
     assert gw.sim.funding_paid == pytest.approx(-0.02)
+
+
+# --------------------------------------------------------------------------- #
+# Regressions: the fill model may never open risk on its own (Invariant 1)
+# --------------------------------------------------------------------------- #
+
+
+def test_us_t10_ac2_a_resting_reduce_only_order_cannot_open_a_position(
+    paper: PaperGateway, inner: FakeGateway
+) -> None:
+    """5.9 step 4 — "a stale target can never flip a position by accident"."""
+    paper.place_order(_ioc(side=Side.BUY, qty=2.0))
+    resting = paper.place_order(_req(side=Side.SELL, price=100.1, qty=2.0, reduce_only=True))
+    paper.place_order(_ioc(side=Side.SELL, qty=2.0, reduce_only=True))  # closed another way
+    assert paper.sim.position_qty("BTCUSDT") == 0.0
+
+    inner.set_book("BTCUSDT", 100.3, 100.5)  # the market trades through the resting sell
+    paper.poll()
+
+    assert paper.sim.position_qty("BTCUSDT") == 0.0
+    assert paper.get_order("BTCUSDT", resting.order_id).status is OrderStatus.CANCELED
+
+
+def test_a_resting_reduce_only_fill_is_truncated_to_the_remaining_position(
+    paper: PaperGateway, inner: FakeGateway
+) -> None:
+    paper.place_order(_ioc(side=Side.BUY, qty=2.0))
+    resting = paper.place_order(_req(side=Side.SELL, price=100.1, qty=2.0, reduce_only=True))
+    paper.place_order(_ioc(side=Side.SELL, qty=1.5, reduce_only=True))  # most of it went elsewhere
+
+    inner.set_book("BTCUSDT", 100.3, 100.5)
+    paper.poll()
+
+    assert paper.sim.position_qty("BTCUSDT") == pytest.approx(0.0)
+    assert paper.get_order("BTCUSDT", resting.order_id).filled_qty == pytest.approx(0.5)
+    assert paper.user_trades("BTCUSDT")[-1].qty == pytest.approx(0.5)
+
+
+def test_funding_that_settled_while_flat_is_not_charged_to_a_reopened_position(
+    paper: PaperGateway, inner: FakeGateway, clock: FakeClock
+) -> None:
+    """Funding is owed by the position that was held, not by the symbol."""
+    t0 = clock.now_ms()
+    paper.place_order(_ioc(side=Side.BUY, qty=2.0))
+    inner.set_funding("BTCUSDT", [(t0 + 1_000, 0.0001)])
+    clock.advance(seconds=2)
+    paper.poll()
+    assert paper.sim.funding_paid == pytest.approx(-0.02)
+
+    paper.place_order(_ioc(side=Side.SELL, qty=2.0, reduce_only=True))
+    inner.set_funding("BTCUSDT", [(t0 + 1_000, 0.0001), (t0 + 5_000, 0.01)])  # settled while flat
+    clock.advance(seconds=10)
+    paper.poll()
+
+    paper.place_order(_ioc(side=Side.BUY, qty=2.0))  # re-open
+    paper.poll()
+    assert paper.sim.funding_paid == pytest.approx(-0.02)
+
+
+def test_a_refused_taker_order_leaves_nothing_resting(clock: FakeClock, cfg: AppConfig) -> None:
+    bare = FakeGateway(clock)
+    bare.set_symbol_info("BTCUSDT", tick_size=0.1, step_size=0.001, min_notional=0.0)
+    gw = PaperGateway(bare, clock, cfg)
+    with pytest.raises(GatewayError):
+        gw.place_order(_ioc(qty=1.0))
+    assert gw.open_orders() == []
+    bare.set_book("BTCUSDT", 99.9, 100.1)
+    gw.poll()
+    assert gw.positions() == {}
+
+
+def test_a_limit_priced_through_the_touch_is_a_taker_not_a_resting_maker(paper: PaperGateway) -> None:
+    order = paper.place_order(_req(side=Side.BUY, price=100.5, time_in_force=TimeInForce.GTC))
+    assert order.status is OrderStatus.FILLED
+    assert order.avg_price == pytest.approx(100.1 * (1.0 + 2.0 / BPS))
+    assert paper.user_trades("BTCUSDT")[0].is_maker is False
+
+
+def test_a_passive_gtc_limit_still_rests(paper: PaperGateway) -> None:
+    order = paper.place_order(_req(side=Side.BUY, price=99.8, time_in_force=TimeInForce.GTC))
+    assert order.status is OrderStatus.NEW
+    assert paper.open_orders() == [order]
+
+
+def test_exchange_info_hands_out_a_copy_of_the_cache(paper: PaperGateway) -> None:
+    info = paper.exchange_info()
+    info.pop("BTCUSDT")
+    assert "BTCUSDT" in paper.exchange_info()

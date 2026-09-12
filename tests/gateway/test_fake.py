@@ -915,3 +915,14 @@ def test_a_transfer_moves_the_wallet_without_touching_pnl(gw: FakeGateway, clock
     assert row["incomeType"] == str(IncomeType.TRANSFER)
     assert IncomeType.parse(row["incomeType"]).is_transfer
     assert row["symbol"] == ""
+
+
+def test_daily_bars_limit_truncates_the_way_binance_does(gw: FakeGateway) -> None:
+    """Forward from a start: the oldest ``limit``; open-ended: the newest ones."""
+    gw.set_closes("BTCUSDT", [100.0 + i for i in range(10)], start_day=date(2026, 1, 1))
+    assert [b.day for b in gw.daily_bars("BTCUSDT", start=date(2026, 1, 1), limit=2)] == [
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+    ]
+    assert [b.day for b in gw.daily_bars("BTCUSDT", limit=2)] == [date(2026, 1, 9), date(2026, 1, 10)]
+    assert gw.daily_bars("BTCUSDT", limit=0) == []

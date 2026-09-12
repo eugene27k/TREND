@@ -98,3 +98,39 @@ def test_prune_bounds_the_table_on_the_free_host(clock, gateway, repos) -> None:
     heartbeat.prune(clock.now_ms() - DAY_MS)
 
     assert repos.heartbeats.count(0, clock.now_ms() + 1) == 1
+
+
+def test_the_default_pinger_posts_to_the_url_and_reports_the_status(monkeypatch) -> None:
+    import aegis.ops.heartbeat as hb
+
+    seen: list[str] = []
+
+    class _Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc) -> None:
+            return None
+
+    def fake_urlopen(request, timeout=0):
+        seen.append(request.full_url)
+        return _Response()
+
+    monkeypatch.setattr(hb.urllib.request, "urlopen", fake_urlopen)
+
+    assert hb.urllib_pinger("https://hc.example/abc", True, "") is True
+    assert hb.urllib_pinger("https://hc.example/abc", False, "down") is True
+    assert seen == ["https://hc.example/abc", "https://hc.example/abc/fail"]
+
+
+def test_the_default_pinger_returns_false_when_the_watcher_is_unreachable(monkeypatch) -> None:
+    import aegis.ops.heartbeat as hb
+
+    def explode(request, timeout=0):
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(hb.urllib.request, "urlopen", explode)
+
+    assert hb.urllib_pinger("https://hc.example/abc", True, "") is False

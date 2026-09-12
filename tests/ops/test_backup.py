@@ -195,3 +195,63 @@ def test_us_t19_ac4_verify_all_covers_every_database(bctx: Context, tmp_path: Pa
     assert set(results) == {str(source), str(second)}
     assert results[str(source)].ok is True
     assert results[str(second)].ok is False  # the carry rows are not in the trend replica
+
+
+def test_a_replica_that_is_a_single_file_still_reports_lag(bctx: Context, tmp_path: Path) -> None:
+    import os
+
+    replica = tmp_path / "replica"
+    replica.write_bytes(b"snapshot")
+    os.utime(replica, ((NOW - 4_000) / 1000, (NOW - 4_000) / 1000))
+
+    status = Backup(bctx).verify_replica()
+
+    assert status.exists is True
+    assert status.lag_s == pytest.approx(4.0, abs=0.01)
+
+
+def test_litestream_restore_shells_out_and_reports_the_exit_code(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    monkeypatch.setattr(backup_module, "litestream_available", lambda: True)
+    destination = tmp_path / "out.db"
+    calls: list[list[str]] = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        destination.write_bytes(b"restored")
+        return subprocess.CompletedProcess(args, 0)
+
+    monkeypatch.setattr(backup_module.subprocess, "run", fake_run)
+
+    assert litestream_restore(tmp_path / "replica", destination) is True
+    assert calls[0][:2] == ["litestream", "restore"]
+
+
+def test_litestream_restore_reports_a_non_zero_exit_as_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import subprocess
+
+    monkeypatch.setattr(backup_module, "litestream_available", lambda: True)
+    monkeypatch.setattr(
+        backup_module.subprocess, "run",
+        lambda args, **kw: subprocess.CompletedProcess(args, 1),
+    )
+
+    assert litestream_restore(tmp_path / "replica", tmp_path / "out.db") is False
+
+
+def test_litestream_restore_swallows_an_os_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(backup_module, "litestream_available", lambda: True)
+
+    def explode(args, **kwargs):
+        raise OSError("binary vanished")
+
+    monkeypatch.setattr(backup_module.subprocess, "run", explode)
+
+    assert litestream_restore(tmp_path / "replica", tmp_path / "out.db") is False

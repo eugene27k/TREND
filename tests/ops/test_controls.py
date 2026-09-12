@@ -193,3 +193,15 @@ def test_a_configured_token_overrides_the_default_confirmation(cfg, clock, gatew
         controls.stop("alice", "r", CONFIRM_TOKEN)
     controls.stop("alice", "r", "GO")
     assert controls.state()["stopped"] is True
+
+
+def test_an_unknown_configured_phase_falls_back_to_p0(clock, gateway, repos) -> None:
+    from aegis.core.config import load_config
+    from aegis.core.types import Strategy
+    from aegis.ops.alerts import AlertBus
+
+    tuned = load_config("config/trend.yaml", {"phase": {"current": "NOT_A_PHASE"}}, use_env=False)
+    ctx = Context(cfg=tuned, clock=clock, gateway=gateway, repos=repos,
+                  alerts=AlertBus(repos.alerts, clock, Strategy.TREND))
+
+    assert Controls(ctx).state()["phase"] == "P0_BACKTEST"
