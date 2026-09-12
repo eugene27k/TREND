@@ -1,0 +1,127 @@
+# TREND — Diversified Time-Series Momentum (PRD Appendix A defaults).
+# Invariant 7: nothing here is written by the engine. Changing a value is an
+# audited operator action and shows up in every backtest manifest and in the
+# parameter snapshot stored with each rebalance.
+strategy: TREND
+mode: paper
+
+account:
+  sub_account_name: trend-01
+  api_key: ${BINANCE_API_KEY}
+  api_secret: ${BINANCE_API_SECRET}
+  leverage: 5                 # margin allocation only; exposure is governed by Section 5.5
+  margin_type: CROSSED
+  position_mode_one_way: true
+  multi_assets_mode: false
+  bnb_fee_discount: true
+  assert_sub_account: true
+
+universe:
+  size: 16
+  min_history_days: 400
+  volume_window_days: 30
+  force_include: [BTCUSDT, ETHUSDT]
+  exclude_bases: [USDC, FDUSD, DAI, TUSD, USDP, EURI, EUR]
+  refresh_day_utc: 1
+  refresh_time_utc: "00:05"
+
+signal:
+  pairs: [[8, 24], [16, 48], [32, 96]]
+  price_std_window: 63
+  y_std_window: 250
+  response_norm: 0.89
+  clip: 1.0
+
+vol:
+  half_life_days: 10
+  floor: 0.30
+  cap: 3.00
+
+cov:
+  half_life_days: 20
+  min_obs: 60
+
+sizing:
+  sigma_target_asset: 0.25
+  sigma_target_portfolio: 0.20
+  conviction_full: 0.5
+  s_max: 3.0
+  min_target_frac: 0.001
+
+caps:
+  gross: 2.5
+  net: 1.5
+  single: 0.25
+
+funding:
+  haircut_threshold: 0.30
+  haircut: 0.5
+
+governor:
+  down: {0.12: 0.5, 0.20: 0.25}
+  up: {0.15: 0.5, 0.08: 1.0}
+
+rebalance:
+  time_utc: "00:05"
+  end_utc: "01:00"
+  bar_fetch_time_utc: "00:02"
+  bar_deadline_utc: "00:04"
+  hysteresis_frac: 0.10
+  hysteresis_equity_frac: 0.0025
+
+exec:
+  repeg_s: 30
+  escalate_s: 300
+  risk_escalate_s: 60
+  clip_frac_of_minute: 0.005
+  max_slices: 30
+  max_twap_min: 30
+  slippage_bps: {BTCUSDT: 2, ETHUSDT: 2, default: 6}
+
+risk:
+  margin_amber: 0.20
+  margin_red: 0.35
+  max_expected_downtime_h: 12
+  shock_price: 0.40
+  hard_halt_dd: 0.25
+  daily_loss_block: 0.06
+  adl_reduce_quantile: 4
+
+tracking:
+  min_corr: 0.7
+  max_cum_diff: 0.03
+  max_cost_ratio: 2.0
+  max_turnover_ratio: 1.5
+
+metrics:
+  job_time_utc: "01:10"       # avoids CARRY's 00:05 job (Section 13)
+
+bench:
+  rf_annual: 0.04
+
+heartbeat:
+  enabled: false
+  url: ${HEALTHCHECKS_URL_TREND}
+  interval_s: 300
+
+backup:
+  enabled: false
+  litestream_replica_path: backups/trend
+
+telegram:
+  enabled: false
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+  prefix: TREND
+  daily_time_utc: "00:10"
+  rebalance_summary_time_utc: "01:05"
+
+infra:
+  monthly_cost_eur: 0.0
+
+storage:
+  db_path: data/trend.db
+
+phase:
+  current: P0_BACKTEST
+  capital_usdt: 0
