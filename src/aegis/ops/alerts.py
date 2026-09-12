@@ -69,7 +69,7 @@ class AlertBus:
         for sink in self.sinks:
             try:
                 delivered = bool(sink(alert)) or delivered
-            except Exception:  # noqa: BLE001 - a broken channel must never stop the engine
+            except Exception:  # a broken channel must never stop the engine
                 continue
         if delivered:
             self.repo.mark_delivered(alert_id)

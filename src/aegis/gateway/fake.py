@@ -108,6 +108,8 @@ class FakeGateway:
         self._permissions = {"futures": True, "withdraw": False, "ip_restricted": True}
         self._sub_account: str | None = sub_account_name
         self._bnb = 1.0
+        self._adl: dict[str, int] = {}
+        self._liquidation: dict[str, float] = {}
         self._time_offset_ms = 0
         self._fill_policy = fill_policy
         self._fill_hook = fill_hook
@@ -259,6 +261,13 @@ class FakeGateway:
     def set_bnb_balance(self, amount: float) -> None:
         self._bnb = amount
 
+    def set_adl_quantile(self, symbol: str, quantile: int) -> None:
+        """ADL quantile is venue metadata, not P&L state, so it overlays the sim."""
+        self._adl[symbol] = int(quantile)
+
+    def set_liquidation_price(self, symbol: str, price: float) -> None:
+        self._liquidation[symbol] = float(price)
+
     def set_server_time_offset_ms(self, offset_ms: int) -> None:
         """Make the venue clock disagree with ours — for the drift check."""
         self._time_offset_ms = offset_ms
@@ -370,7 +379,14 @@ class FakeGateway:
 
     def positions(self) -> dict[str, Position]:
         self._check("positions")
-        return self.sim.positions_snapshot(self.clock.now_ms())
+        snapshot = self.sim.positions_snapshot(self.clock.now_ms())
+        if not self._adl and not self._liquidation:
+            return snapshot
+        return {
+            s: replace(p, adl_quantile=self._adl.get(s, p.adl_quantile),
+                       liquidation_price=self._liquidation.get(s, p.liquidation_price))
+            for s, p in snapshot.items()
+        }
 
     def income(self, start_ms: int, end_ms: int | None = None, limit: int = 1000) -> list[dict]:
         self._check("income")
