@@ -223,7 +223,7 @@ def test_us_t12_ac2_gross_breach_scales_the_whole_book_proportionally(book, ctx)
     cuts = {c.symbol: c.fraction for c in sup.reductions(s, ctx.gateway.positions())}
     assert len(cuts) == 12
     # every leg is cut by the same proportion, landing gross exactly on the cap
-    assert len(set(round(f, 9) for f in cuts.values())) == 1
+    assert len({round(f, 9) for f in cuts.values()}) == 1
     remaining = sum(abs(n) * (1 - cuts[sym]) for sym, n in legs.items())
     assert remaining == pytest.approx(ctx.cfg.caps.gross * E)
 
