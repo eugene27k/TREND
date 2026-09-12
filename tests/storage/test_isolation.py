@@ -48,53 +48,118 @@ TS = 1_757_289_600_000
 
 
 def _info(symbol: str) -> SymbolInfo:
-    return SymbolInfo(symbol, symbol[:-4], "USDT", "TRADING", "PERPETUAL", 0.1, 0.001, 0.001,
-                      100.0, 1, 3)
+    return SymbolInfo(symbol, symbol[:-4], "USDT", "TRADING", "PERPETUAL", 0.1, 0.001, 0.001, 100.0, 1, 3)
 
 
 def _populate(repos: Repositories, symbol: str, amount: float) -> None:
     """Write one row into every shared and TREND table for this strategy."""
     st = repos.strategy
     repos.symbol_meta.upsert_many([_info(symbol)], TS)
-    repos.ledger.add_many([
-        LedgerEntry(st, TS, IncomeType.FUNDING_FEE, "USDT", amount, symbol, f"tran-{symbol}"),
-        LedgerEntry(st, TS, IncomeType.COMMISSION, "USDT", -amount, symbol, f"com-{symbol}"),
-    ])
+    repos.ledger.add_many(
+        [
+            LedgerEntry(st, TS, IncomeType.FUNDING_FEE, "USDT", amount, symbol, f"tran-{symbol}"),
+            LedgerEntry(st, TS, IncomeType.COMMISSION, "USDT", -amount, symbol, f"com-{symbol}"),
+        ]
+    )
     repos.ledger.set_sync_cursor(TS, TS)
     acct = AccountState(TS, amount, amount, 0.0, amount, 0.0, 0.0)
     pos = Position(symbol, 1.0, 100.0, 100.0)
     repos.snapshots.add(acct, [pos], gross=amount, net=amount)
     repos.equity.upsert(DAY, EquityPoint(TS, amount, 0.0, 1.0, 1.0), peak_index=1.0, drawdown=0.0)
     repos.positions.replace_all([pos], TS)
-    repos.orders.upsert(Order(f"o-{symbol}", f"c-{symbol}", symbol, Side.BUY, OrderType.LIMIT, 1.0,
-                              100.0, TimeInForce.GTX, False, OrderStatus.NEW, strategy=st,
-                              rebalance_id="rb-1", slice_id="sl-1"))
-    repos.fills.add_many([Fill(f"t-{symbol}", f"o-{symbol}", symbol, Side.BUY, 1.0, 100.0, 0.02,
-                               "USDT", True, TS, strategy=st, rebalance_id="rb-1",
-                               slice_id="sl-1")])
-    repos.universe.save(UniverseResult("2026-09", (UniverseEntry(symbol, 1, amount, 500, True,
-                                                                "top-16 by volume"),)), TS)
-    repos.bars.upsert_many([DailyBar(symbol, __import__("datetime").date.fromisoformat(DAY),
-                                     100.0, 101.0, 99.0, 100.5, 10.0, amount, TS, TS + 1)])
-    repos.signals.save_many(DAY, [SignalResult(symbol, (1.0,) * 3, (1.0,) * 3, (1.0,) * 3,
-                                               (0.5,) * 3, 0.5, bar_ts_ms=TS)], TS)
+    repos.orders.upsert(
+        Order(
+            f"o-{symbol}",
+            f"c-{symbol}",
+            symbol,
+            Side.BUY,
+            OrderType.LIMIT,
+            1.0,
+            100.0,
+            TimeInForce.GTX,
+            False,
+            OrderStatus.NEW,
+            strategy=st,
+            rebalance_id="rb-1",
+            slice_id="sl-1",
+        )
+    )
+    repos.fills.add_many(
+        [
+            Fill(
+                f"t-{symbol}",
+                f"o-{symbol}",
+                symbol,
+                Side.BUY,
+                1.0,
+                100.0,
+                0.02,
+                "USDT",
+                True,
+                TS,
+                strategy=st,
+                rebalance_id="rb-1",
+                slice_id="sl-1",
+            )
+        ]
+    )
+    repos.universe.save(
+        UniverseResult("2026-09", (UniverseEntry(symbol, 1, amount, 500, True, "top-16 by volume"),)), TS
+    )
+    repos.bars.upsert_many(
+        [
+            DailyBar(
+                symbol,
+                __import__("datetime").date.fromisoformat(DAY),
+                100.0,
+                101.0,
+                99.0,
+                100.5,
+                10.0,
+                amount,
+                TS,
+                TS + 1,
+            )
+        ]
+    )
+    repos.signals.save_many(
+        DAY, [SignalResult(symbol, (1.0,) * 3, (1.0,) * 3, (1.0,) * 3, (0.5,) * 3, 0.5, bar_ts_ms=TS)], TS
+    )
     repos.risk_model.save(DAY, RiskModel((symbol,), {symbol: 0.5}, ((1.0,),), 0.0), TS)
     repos.rebalances.create("rb-1", DAY, TS, equity=amount)
-    repos.targets.save("rb-1", Targets(
-        (SymbolTarget(symbol, 0.5, 0.5, amount, amount),), 0.1, 0.5, 0.2, 2.0, 1.0, amount))
+    repos.targets.save(
+        "rb-1", Targets((SymbolTarget(symbol, 0.5, 0.5, amount, amount),), 0.1, 0.5, 0.2, 2.0, 1.0, amount)
+    )
     repos.slices.create("sl-1", "rb-1", symbol, 0, Side.BUY, 1.0, False, TS)
     repos.governor.record(TS, 0.05, 1.0, 1.0, "check")
     repos.symbol_pnl.upsert_many(DAY, [{"symbol": symbol, "side": "long", "net_pnl": amount}])
-    repos.trades.upsert({"trade_key": f"{symbol}:{TS}", "symbol": symbol, "side": "long",
-                         "open_ts": TS, "close_ts": TS + 1000, "pnl": amount})
+    repos.trades.upsert(
+        {
+            "trade_key": f"{symbol}:{TS}",
+            "symbol": symbol,
+            "side": "long",
+            "open_ts": TS,
+            "close_ts": TS + 1000,
+            "pnl": amount,
+        }
+    )
     repos.illiquid.flag(symbol, TS, TS + 86_400_000, "test")
     repos.illiquid.record_failure(symbol, DAY, "test")
     repos.metrics.save_many([MetricValue(st, "sharpe", "30d", amount, TS, 30)])
     repos.alerts.add(Alert(st, TS, Severity.CRITICAL, "TEST", f"alert for {symbol}"))
     repos.reports.save("daily", DAY, f"body for {symbol}", TS)
-    repos.state.save(state="IDLE", phase="P1_PAPER", paused=False, stopped=False, safe_mode=False,
-                     halt_reason="", governor_g=1.0, blocks=[], context={"symbol": symbol},
-                     now_ms=TS)
+    repos.state.save(
+        state="IDLE",
+        phase="P1_PAPER",
+        paused=False,
+        stopped=False,
+        safe_mode=False,
+        halt_reason="",
+        governor_g=1.0,
+        blocks=[],
+        context={"symbol": symbol},
+        now_ms=TS,
+    )
     repos.state.log_control("start", "op", "test", {"symbol": symbol}, TS)
     repos.approvals.add("P1_PAPER", True, "op", f"approval for {symbol}", {}, amount, TS)
     repos.heartbeats.add(TS, True, symbol)
@@ -121,9 +186,9 @@ def _read_methods(repo: object) -> list[str]:
             continue
         sig = inspect.signature(fn)
         required = [
-            p for p in sig.parameters.values()
-            if p.default is inspect.Parameter.empty
-            and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+            p
+            for p in sig.parameters.values()
+            if p.default is inspect.Parameter.empty and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
         ]
         if not required:
             out.append(name)

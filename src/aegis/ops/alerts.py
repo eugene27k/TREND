@@ -23,8 +23,15 @@ Sink = Callable[[Alert], bool]
 class AlertBus:
     """Persist-then-deliver, with per-code repeat suppression."""
 
-    def __init__(self, repo: AlertRepo, clock: Clock, strategy: Strategy,
-                 sinks: list[Sink] | None = None, *, repeat_minutes: float = 15.0) -> None:
+    def __init__(
+        self,
+        repo: AlertRepo,
+        clock: Clock,
+        strategy: Strategy,
+        sinks: list[Sink] | None = None,
+        *,
+        repeat_minutes: float = 15.0,
+    ) -> None:
         self.repo = repo
         self.clock = clock
         self.strategy = strategy
@@ -34,8 +41,15 @@ class AlertBus:
     def add_sink(self, sink: Sink) -> None:
         self.sinks.append(sink)
 
-    def emit(self, severity: Severity, code: str, message: str,
-             context: dict[str, Any] | None = None, *, suppress_repeat: bool = True) -> int | None:
+    def emit(
+        self,
+        severity: Severity,
+        code: str,
+        message: str,
+        context: dict[str, Any] | None = None,
+        *,
+        suppress_repeat: bool = True,
+    ) -> int | None:
         """Record an alert and try to deliver it. Returns the row id, or None if suppressed.
 
         Suppression is by ``code`` only: the same condition re-detected on the
@@ -49,8 +63,14 @@ class AlertBus:
             if last is not None and now - int(last["ts"]) < self.repeat_ms:
                 return None
 
-        alert = Alert(strategy=self.strategy, ts_ms=now, severity=severity, code=code,
-                      message=message, context=context or {})
+        alert = Alert(
+            strategy=self.strategy,
+            ts_ms=now,
+            severity=severity,
+            code=code,
+            message=message,
+            context=context or {},
+        )
         alert_id = self.repo.add(alert)
         self._deliver(alert, alert_id)
         return alert_id
@@ -78,8 +98,13 @@ class AlertBus:
         """Retry anything a sink failed to take earlier. Returns how many got through."""
         sent = 0
         for row in self.repo.undelivered():
-            alert = Alert(strategy=self.strategy, ts_ms=row["ts"], severity=Severity(row["severity"]),
-                          code=row["code"], message=row["message"])
+            alert = Alert(
+                strategy=self.strategy,
+                ts_ms=row["ts"],
+                severity=Severity(row["severity"]),
+                code=row["code"],
+                message=row["message"],
+            )
             before = self.repo.undelivered()
             self._deliver(alert, int(row["id"]))
             if len(self.repo.undelivered()) < len(before):

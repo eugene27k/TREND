@@ -26,8 +26,9 @@ def _row_factory(cursor: sqlite3.Cursor, row: tuple) -> dict[str, Any]:
 class Database:
     """Thin, thread-safe wrapper around a SQLite connection."""
 
-    def __init__(self, path: str | Path, *, wal: bool = True, busy_timeout_ms: int = 10_000,
-                 read_only: bool = False) -> None:
+    def __init__(
+        self, path: str | Path, *, wal: bool = True, busy_timeout_ms: int = 10_000, read_only: bool = False
+    ) -> None:
         self.path = Path(path)
         self.read_only = read_only
         if str(self.path) != ":memory:":
@@ -117,16 +118,16 @@ class Database:
 
     def tables(self) -> list[str]:
         return [
-            r["name"]
-            for r in self.query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            r["name"] for r in self.query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
         ]
 
     def columns(self, table: str) -> list[str]:
         return [r["name"] for r in self.query(f"PRAGMA table_info({table})")]
 
 
-def open_db(path: str | Path, *, wal: bool = True, busy_timeout_ms: int = 10_000,
-            migrate: bool = True) -> Database:
+def open_db(
+    path: str | Path, *, wal: bool = True, busy_timeout_ms: int = 10_000, migrate: bool = True
+) -> Database:
     db = Database(path, wal=wal, busy_timeout_ms=busy_timeout_ms)
     if migrate:
         db.migrate()

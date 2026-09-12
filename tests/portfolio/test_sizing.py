@@ -752,6 +752,12 @@ _SYMBOLS = ("AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT", "EEEUSDT")
     g=st.sampled_from([0.25, 0.5, 1.0]),
     rho=st.floats(min_value=0.0, max_value=0.95),
     s_max=st.floats(min_value=0.0, max_value=10.0),
+    funding=st.lists(
+        st.floats(min_value=-2.0, max_value=2.0, allow_nan=False, allow_infinity=False),
+        min_size=len(_SYMBOLS),
+        max_size=len(_SYMBOLS),
+    ),
+    min_notional=st.floats(min_value=0.0, max_value=500.0),
 )
 def test_us_t06_invariant_8_all_three_caps_hold_on_every_returned_book(
     signals: list[float],
@@ -760,8 +766,15 @@ def test_us_t06_invariant_8_all_three_caps_hold_on_every_returned_book(
     g: float,
     rho: float,
     s_max: float,
+    funding: list[float],
+    min_notional: float,
 ) -> None:
-    """Exposure is bounded by construction — for every book, not just the tested ones."""
+    """Exposure is bounded by construction — for every book, not just the tested ones.
+
+    The funding haircut and the min-notional floor are drawn too: both run *after*
+    the caps and both can lift net exposure, so a property that leaves them out
+    cannot see Invariant 8 break.
+    """
     symbols = _SYMBOLS[: len(signals)]
     n = len(symbols)
     corr = tuple(tuple(1.0 if i == j else rho for j in range(n)) for i in range(n))
@@ -779,6 +792,8 @@ def test_us_t06_invariant_8_all_three_caps_hold_on_every_returned_book(
         equity,
         g,
         cfg,
+        funding_ann={s: funding[i] for i, s in enumerate(symbols)},
+        min_notionals=dict.fromkeys(symbols, min_notional),
     )
 
     assert check_caps(out, cfg) == ()

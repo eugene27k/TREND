@@ -47,6 +47,21 @@ def round_price(price: float, info: SymbolInfo, side: Side | None = None) -> flo
     return round_step(price, info.tick_size, mode=ROUND_HALF_UP)
 
 
+def round_price_marketable(price: float, info: SymbolInfo, side: Side) -> float:
+    """Snap a price onto the tick grid *towards* the book, so an IOC really crosses.
+
+    The mirror of :func:`round_price`'s side-conservative mode. A taker priced at
+    the touch and then rounded to the nearest tick can land a hair on the passive
+    side of it, and an IOC that does not cross is silently expired rather than
+    filled — the escalation would appear to happen and do nothing. Rounding a buy
+    *up* and a sell *down* costs at most one tick, and only when the venue quotes
+    off-grid; when it quotes on the grid (the normal case) this is a no-op.
+    """
+    if side is Side.BUY:
+        return round_step(price, info.tick_size, mode="ROUND_UP")
+    return round_step(price, info.tick_size, mode=ROUND_DOWN)
+
+
 def format_qty(qty: float, info: SymbolInfo) -> str:
     return f"{_d(round_qty(qty, info)):.{info.quantity_precision}f}"
 
@@ -90,6 +105,7 @@ __all__ = [
     "meets_min_notional",
     "notional_to_qty",
     "round_price",
+    "round_price_marketable",
     "round_qty",
     "round_step",
     "slippage_bps",

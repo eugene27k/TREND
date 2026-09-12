@@ -215,11 +215,23 @@ def test_build_plan_is_pure_no_context_clock_or_gateway(cfg: AppConfig) -> None:
     assert not params & {"ctx", "clock", "gateway", "repos", "alerts"}
     positions = {BTC: position(BTC, 8.5, MARK)}
     first = build_plan(
-        targets({BTC: 1_000.0}), positions, {BTC: info(BTC)}, {BTC: MARK}, EQUITY, cfg,
-        {BTC: minute_volume(DAILY_VOLUME)}, (BTC,),
+        targets({BTC: 1_000.0}),
+        positions,
+        {BTC: info(BTC)},
+        {BTC: MARK},
+        EQUITY,
+        cfg,
+        {BTC: minute_volume(DAILY_VOLUME)},
+        (BTC,),
     )
     second = build_plan(
-        targets({BTC: 1_000.0}), positions, {BTC: info(BTC)}, {BTC: MARK}, EQUITY, cfg,
-        {BTC: minute_volume(DAILY_VOLUME)}, (BTC,),
+        targets({BTC: 1_000.0}),
+        positions,
+        {BTC: info(BTC)},
+        {BTC: MARK},
+        EQUITY,
+        cfg,
+        {BTC: minute_volume(DAILY_VOLUME)},
+        (BTC,),
     )
     assert first == second

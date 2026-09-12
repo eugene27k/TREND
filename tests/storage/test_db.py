@@ -21,10 +21,30 @@ def test_migrate_creates_every_documented_table(tmp_path) -> None:
     db = open_db(tmp_path / "t.db")
     tables = set(db.tables())
     for expected in (
-        "universe_history", "daily_bars", "signal_snapshots", "risk_model_snapshots", "targets",
-        "rebalances", "slices", "governor_state", "symbol_pnl_daily", "trades", "illiquid_flags",
-        "robustness_reports", "walkforward", "ledger", "snapshots", "orders", "fills", "metrics",
-        "approvals", "alerts", "reports", "engine_state", "heartbeats", "reconciliations",
+        "universe_history",
+        "daily_bars",
+        "signal_snapshots",
+        "risk_model_snapshots",
+        "targets",
+        "rebalances",
+        "slices",
+        "governor_state",
+        "symbol_pnl_daily",
+        "trades",
+        "illiquid_flags",
+        "robustness_reports",
+        "walkforward",
+        "ledger",
+        "snapshots",
+        "orders",
+        "fills",
+        "metrics",
+        "approvals",
+        "alerts",
+        "reports",
+        "engine_state",
+        "heartbeats",
+        "reconciliations",
     ):
         assert expected in tables, expected
 

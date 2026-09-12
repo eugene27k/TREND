@@ -143,7 +143,9 @@ def test_us_t04_ac4_snapshot_row_keys_are_real_signal_snapshots_columns() -> Non
     """A flattener whose keys are not the table's columns cannot be written."""
     columns = signal_snapshot_columns()
     assert {"day", "symbol", "signal", "warm", "bar_ts", "x1", "u3"} <= columns
-    row = signal_snapshot_row(compute_signal(C1_PRICES, c1_config(), "BTCUSDT", date(2026, 1, 2)), c1_config())
+    row = signal_snapshot_row(
+        compute_signal(C1_PRICES, c1_config(), "BTCUSDT", date(2026, 1, 2)), c1_config()
+    )
     assert set(row) <= columns
 
 

@@ -93,9 +93,7 @@ class DriftMonitor:
                 continue
             fraction = _drift_fraction(current_notional, target_notional)
             if fraction > cfg.risk.drift_frac:
-                findings.append(
-                    self._drift(symbol, current_qty, current_notional, target_notional, fraction)
-                )
+                findings.append(self._drift(symbol, current_qty, current_notional, target_notional, fraction))
 
         self._last_qty = {s: p.qty for s, p in positions.items() if p.qty != 0.0}
         return findings

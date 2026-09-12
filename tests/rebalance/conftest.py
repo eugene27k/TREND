@@ -62,9 +62,7 @@ def targets(notionals: Mapping[str, float], equity: float = 10_000.0, g: float =
         )
         for symbol, notional in sorted(notionals.items())
     )
-    return Targets(
-        targets=rows, sigma_p=0.2, conv=0.5, sigma_eff=0.2, s=1.0, g=g, equity=equity
-    )
+    return Targets(targets=rows, sigma_p=0.2, conv=0.5, sigma_eff=0.2, s=1.0, g=g, equity=equity)
 
 
 def fill_hook(*, maker: bool = True):

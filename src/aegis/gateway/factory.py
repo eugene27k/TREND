@@ -59,7 +59,7 @@ def _build_paper(cfg: AppConfig, clock: Clock, data: ExchangeGateway) -> Exchang
     try:
         params = inspect.signature(PaperGateway).parameters
     except (TypeError, ValueError):  # pragma: no cover - builtins only
-        return PaperGateway(cfg, clock, data)
+        return PaperGateway(data, clock, cfg)
     kwargs = {name: value for name, value in candidates.items() if name in params}
     return PaperGateway(**kwargs)
 

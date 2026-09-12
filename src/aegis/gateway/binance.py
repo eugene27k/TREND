@@ -35,7 +35,7 @@ from aegis.core.errors import (
     PermissionChanged,
     RateLimited,
 )
-from aegis.core.precision import format_price, format_qty
+from aegis.core.precision import format_price, format_qty, round_price_marketable
 from aegis.core.types import (
     AccountState,
     BookTicker,
@@ -55,6 +55,9 @@ from aegis.core.types import (
 #: Binance caps a single ``/fapi/v1/klines`` page at 1500 rows.
 KLINE_PAGE_LIMIT = 1500
 
+#: Binance caps a single ``/fapi/v1/income`` page at 1000 rows.
+INCOME_PAGE_LIMIT = 1000
+
 #: Defensive bound on pagination loops — a venue that never advances its cursor
 #: must fail loudly rather than spin forever inside a rebalance window.
 MAX_PAGES = 250
@@ -70,6 +73,7 @@ SIGNED_PATHS: frozenset[str] = frozenset(
         "/fapi/v2/account",
         "/fapi/v2/balance",
         "/fapi/v2/positionRisk",
+        "/fapi/v1/adlQuantile",
         "/fapi/v1/order",
         "/fapi/v1/openOrders",
         "/fapi/v1/allOpenOrders",
@@ -156,20 +160,32 @@ class BinanceGateway:
         ).hexdigest()
         return f"{query}&signature={signature}"
 
+    def _url(self, path: str, params: dict[str, Any], *, signed: bool) -> str:
+        """Serialise (and, when signed, stamp and sign) one attempt's query."""
+        if signed:
+            stamped = dict(params)
+            stamped["timestamp"] = self.clock.now_ms()
+            stamped["recvWindow"] = self.cfg.exchange.recv_window_ms
+            query = self._sign(stamped)
+        else:
+            query = urlencode(params)
+        return f"{path}?{query}" if query else path
+
     def _request(self, method: str, path: str, params: dict[str, Any] | None = None) -> Any:
         sent = {k: v for k, v in (params or {}).items() if v is not None}
-        if path in SIGNED_PATHS:
-            sent["timestamp"] = self.clock.now_ms()
-            sent["recvWindow"] = self.cfg.exchange.recv_window_ms
-            query = self._sign(sent)
-        else:
-            query = urlencode(sent)
-        url = f"{path}?{query}" if query else path
+        signed = path in SIGNED_PATHS
 
         attempts = max(1, self.cfg.exchange.max_retries + 1)
         last: Exception | None = None
         for attempt in range(attempts):
             self._throttle()
+            # Stamped and signed once per attempt: a retry (or a throttle wait)
+            # that re-sends the first attempt's timestamp is already outside
+            # ``recvWindow``, and the venue answers -1021 — which this boundary
+            # would report as clock drift and a safe-mode trigger. The rest of
+            # the parameters, ``newClientOrderId`` included, never change, so a
+            # retried order is still the same order to the venue.
+            url = self._url(path, sent, signed=signed)
             try:
                 response = self._client.request(method, url)
             except (httpx.TimeoutException, httpx.TransportError) as exc:
@@ -225,7 +241,11 @@ class BinanceGateway:
             return InsufficientMargin(f"{path}: {msg}")
         if path in ORDER_PATHS:
             return OrderRejected(f"{path}: {msg}", code=code)
-        return GatewayError(f"{path}: HTTP {status} {msg}")
+        err = GatewayError(f"{path}: HTTP {status} {msg}")
+        # The venue's own code, for the few callers that special-case one
+        # (``set_margin_type``); matching on the English message is not a check.
+        err.code = code  # type: ignore[attr-defined]
+        return err
 
     # -- instrument & market data ------------------------------------------- #
 
@@ -402,6 +422,13 @@ class BinanceGateway:
 
     def _interval_hours(self, symbol: str) -> float:
         info = self._symbols.get(symbol)
+        if info is None:
+            # A cold cache must not annualise a 4h symbol at 8h: that halves
+            # ``f_i`` and the Section 5.6 haircut silently never fires. Fetch
+            # the instrument once (it is cached from then on) and fall back to
+            # the default only when the venue cannot tell us.
+            with contextlib.suppress(GatewayError, ClockDrift):
+                info = self.symbol_info(symbol)
         return info.funding_interval_hours if info else self.cfg.funding.default_interval_hours
 
     def funding_history(
@@ -455,8 +482,38 @@ class BinanceGateway:
             initial_margin=float(raw["totalInitialMargin"]),
         )
 
+    def _adl_quantiles(self) -> dict[str, int]:
+        """``/fapi/v1/adlQuantile`` — ``positionRisk`` does not carry it.
+
+        US-T12 AC 4 reduces a short at quantile >= 4, so a gateway that leaves
+        every quantile at 0 disables that rule in live without saying so. A
+        failure here still leaves it at 0 rather than breaking every caller of
+        ``positions()`` — reconciliation and the executor both depend on it.
+        """
+        try:
+            rows = self._request("GET", "/fapi/v1/adlQuantile")
+        except (GatewayError, ClockDrift):
+            return {}
+        out: dict[str, int] = {}
+        for row in rows:
+            if not isinstance(row, dict) or "symbol" not in row:
+                continue
+            raw = row.get("adlQuantile")
+            if isinstance(raw, dict):
+                # One-way mode (Locked Decision 1) reports the position under
+                # ``BOTH``; anything else is read at its worst quantile, which
+                # can only reduce risk sooner.
+                numbers = [v for v in raw.values() if isinstance(v, (int, float))]
+                value = raw.get("BOTH", max(numbers, default=0))
+            else:
+                value = raw or 0
+            with contextlib.suppress(TypeError, ValueError):
+                out[str(row["symbol"])] = int(value)
+        return out
+
     def positions(self) -> dict[str, Position]:
         rows = self._request("GET", "/fapi/v2/positionRisk")
+        adl = self._adl_quantiles() if any(float(r["positionAmt"]) != 0.0 for r in rows) else {}
         out: dict[str, Position] = {}
         for row in rows:
             qty = float(row["positionAmt"])
@@ -470,13 +527,14 @@ class BinanceGateway:
                 unrealized_pnl=float(row.get("unRealizedProfit", 0.0)),
                 leverage=float(row.get("leverage", 0.0) or 0.0),
                 liquidation_price=float(row.get("liquidationPrice", 0.0)),
-                adl_quantile=int(row.get("adlQuantile", 0)),
+                adl_quantile=adl.get(row["symbol"], int(row.get("adlQuantile", 0) or 0)),
                 ts_ms=int(row.get("updateTime", 0)),
             )
         return out
 
     def income(self, start_ms: int, end_ms: int | None = None, limit: int = 1000) -> list[dict]:
-        page = min(max(limit, 1), 1000)
+        wanted = min(max(limit, 1), INCOME_PAGE_LIMIT)
+        page = wanted
         out: list[dict] = []
         seen: set[str] = set()
         cursor = start_ms
@@ -489,14 +547,30 @@ class BinanceGateway:
             if not batch:
                 break
             for row in batch:
-                key = f"{row.get('tranId', '')}:{row.get('time', '')}:{row.get('incomeType', '')}"
+                key = (
+                    f"{row.get('tranId', '')}:{row.get('time', '')}:{row.get('incomeType', '')}"
+                    f":{row.get('symbol', '')}:{row.get('income', '')}"
+                )
                 if key in seen:
                     continue
                 seen.add(key)
                 out.append(row)
             if len(batch) < page:
                 break
-            cursor = int(batch[-1]["time"]) + 1
+            last_ts = max(int(r.get("time", 0)) for r in batch)
+            if last_ts > cursor:
+                # Re-read from the last millisecond rather than past it: the
+                # dedupe absorbs the overlap, and nothing that shares that
+                # millisecond is lost.
+                cursor, page = last_ts, wanted
+            elif page < INCOME_PAGE_LIMIT:
+                # A full page that does not advance means more rows share this
+                # millisecond than the page holds — every funding settlement of
+                # the day does. Stepping past it would drop them from the ledger
+                # for ever, so widen the page and read the group whole.
+                page = min(page * 2, INCOME_PAGE_LIMIT)
+            else:
+                cursor = last_ts + 1
         out.sort(key=lambda r: int(r.get("time", 0)))
         return out
 
@@ -528,7 +602,7 @@ class BinanceGateway:
         perms = {"futures": False, "withdraw": True, "ip_restricted": False}
         try:
             self.account()
-        except GatewayError:
+        except (GatewayError, ClockDrift):
             pass
         else:
             perms["futures"] = True
@@ -577,7 +651,7 @@ class BinanceGateway:
                 "POST", "/fapi/v1/marginType", {"symbol": symbol, "marginType": margin_type.upper()}
             )
         except GatewayError as exc:
-            if f'code": {_MARGIN_TYPE_UNCHANGED}' in str(exc) or "No need to change" in str(exc):
+            if getattr(exc, "code", 0) == _MARGIN_TYPE_UNCHANGED:
                 return
             raise
 
@@ -609,7 +683,16 @@ class BinanceGateway:
         if request.order_type is OrderType.LIMIT:
             if request.price is None:
                 raise OrderRejected(f"{request.symbol}: LIMIT order without a price", code=0)
-            params["price"] = format_price(request.price, info, request.side)
+            # A taker order is snapped *towards* the book: rounding an IOC the
+            # passive way can leave it a tick short of crossing, and an IOC that
+            # does not cross expires instead of filling — the 5.9 escalation
+            # would look like it happened and do nothing.
+            price = request.price
+            if request.time_in_force in (TimeInForce.IOC, TimeInForce.FOK):
+                price = round_price_marketable(price, info, request.side)
+                params["price"] = format_price(price, info)
+            else:
+                params["price"] = format_price(price, info, request.side)
             params["timeInForce"] = request.time_in_force.value
         try:
             raw = self._request("POST", "/fapi/v1/order", params)
@@ -660,6 +743,28 @@ class BinanceGateway:
         fills.sort(key=lambda f: (f.ts_ms, f.trade_id))
         return fills
 
+    @staticmethod
+    def _status(raw: str) -> OrderStatus:
+        """Venue status -> ``OrderStatus``, never a bare ``ValueError``.
+
+        Binance adds statuses without notice (``EXPIRED_IN_MATCH`` for
+        self-trade prevention); an unrecognised one must reach the executor as a
+        gateway error, not as an exception type nothing in the engine catches.
+        """
+        try:
+            return OrderStatus(raw)
+        except ValueError as exc:
+            if raw.startswith("EXPIRED"):
+                return OrderStatus.EXPIRED
+            raise GatewayError(f"unknown order status {raw!r}") from exc
+
+    @staticmethod
+    def _enum(kind: Any, raw: str, what: str) -> Any:
+        try:
+            return kind(raw)
+        except ValueError as exc:
+            raise GatewayError(f"unknown {what} {raw!r}") from exc
+
     def _parse_order(self, raw: dict[str, Any], request: OrderRequest | None = None) -> Order:
         price = raw.get("price")
         price_f = float(price) if price not in (None, "") else None
@@ -671,13 +776,13 @@ class BinanceGateway:
             order_id=str(raw.get("orderId", "")),
             client_order_id=str(raw.get("clientOrderId", "")),
             symbol=raw["symbol"],
-            side=Side(raw["side"]),
-            order_type=OrderType(raw.get("type", OrderType.LIMIT.value)),
+            side=self._enum(Side, raw["side"], "order side"),
+            order_type=self._enum(OrderType, raw.get("type", OrderType.LIMIT.value), "order type"),
             qty=float(raw.get("origQty", 0.0)),
             price=price_f,
-            time_in_force=TimeInForce(tif),
+            time_in_force=self._enum(TimeInForce, tif, "time in force"),
             reduce_only=bool(raw.get("reduceOnly", False)),
-            status=OrderStatus(raw.get("status", OrderStatus.NEW.value)),
+            status=self._status(str(raw.get("status", OrderStatus.NEW.value))),
             filled_qty=float(raw.get("executedQty", 0.0)),
             avg_price=float(raw.get("avgPrice", 0.0) or 0.0),
             created_ts_ms=created,
@@ -698,6 +803,7 @@ class BinanceGateway:
 
 
 __all__ = [
+    "INCOME_PAGE_LIMIT",
     "KLINE_PAGE_LIMIT",
     "ORDER_PATHS",
     "SIGNED_PATHS",

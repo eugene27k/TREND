@@ -305,9 +305,10 @@ def size_targets(
             leg.target = 0.0
 
     # The funding haircut and the zeroing floor only ever *shrink* individual
-    # legs, which cannot re-break single or gross — but it can break net, because
-    # shrinking the minority side of a directional book raises net exposure
-    # (halve the only short in a net-long book and net goes up). Invariant 8 is a
+    # legs, which cannot re-break single or gross — but they can break net,
+    # because shrinking the minority side of a directional book raises net
+    # exposure (halve the only short in a net-long book and net goes up).
+    # Invariant 8 is a
     # post-condition on what leaves this function, not on an intermediate book, so
     # the net cap runs once more on the final one. A leg the re-scale pushes back
     # under min_notional is left for the planner to drop: a cap is a risk bound

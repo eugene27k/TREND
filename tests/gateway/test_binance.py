@@ -178,6 +178,78 @@ def test_public_request_is_not_signed() -> None:
     assert "recvWindow" not in str(rec.requests[0].url)
 
 
+def test_every_retry_of_a_signed_request_is_re_stamped_and_re_signed() -> None:
+    """A retry that re-sends the first attempt's timestamp is outside recvWindow.
+
+    Backoff is 1 s then 2 s, so by the third attempt the original stamp is 3 s
+    old; with a 5 s recvWindow the venue answers -1021 and this gateway would
+    report a clock drift that never happened. Each attempt must carry the clock
+    reading of the moment it is sent, signed over that same payload.
+    """
+    seen: list[tuple[str, str, str]] = []
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        query = urlparse(str(request.url)).query
+        payload, _, signature = query.rpartition("&signature=")
+        seen.append((dict(parse_qsl(payload))["timestamp"], payload, signature))
+        if len(seen) < 3:
+            return httpx.Response(503, text="boom")
+        return httpx.Response(200, json={"makerCommissionRate": "0.0002", "takerCommissionRate": "0.0005"})
+
+    gw, _, clock = make_gateway({"/fapi/v1/commissionRate": flaky})
+    gw.commission_rate("BTCUSDT")
+
+    stamps = [int(t) for t, _, _ in seen]
+    assert stamps == [0, 1000, 3000]  # the clock at each attempt, not the first
+    assert clock.now_ms() == 3000
+    for _, payload, signature in seen:
+        expected = hmac.new(API_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()
+        assert signature == expected
+
+
+def test_a_signed_request_is_stamped_after_the_weight_throttle_waits() -> None:
+    """The stamp must post-date the throttle sleep, not precede it by a minute."""
+    stamps: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        stamps.append(int(dict(parse_qsl(urlparse(str(request.url)).query))["timestamp"]))
+        return httpx.Response(
+            200,
+            json={"makerCommissionRate": "0.0002", "takerCommissionRate": "0.0005"},
+            headers={WEIGHT_HEADER: "2000"},
+        )
+
+    clock = FakeClock(0)
+    gw, _, _ = make_gateway({"/fapi/v1/commissionRate": handler}, clock=clock)
+    gw.commission_rate("BTCUSDT")
+    gw.commission_rate("ETHUSDT")  # the second call waits out the minute first
+    assert clock.slept == [60.0]
+    assert stamps == [0, 60_000]
+
+
+def test_a_retried_order_keeps_its_client_order_id() -> None:
+    """Re-stamping must not re-identify the order: the venue's duplicate-id
+    rejection is what stops a timed-out POST from becoming two positions."""
+    ids: list[str] = []
+
+    def flaky(request: httpx.Request) -> httpx.Response:
+        q = dict(parse_qsl(urlparse(str(request.url)).query))
+        ids.append(q["newClientOrderId"])
+        if len(ids) < 2:
+            return httpx.Response(502, text="bad gateway")
+        return _order_ack(request)
+
+    gw, _, _ = make_gateway(
+        {
+            "/fapi/v1/exchangeInfo": EXCHANGE_INFO,
+            "/fapi/v1/fundingInfo": FUNDING_INFO,
+            "/fapi/v1/order": flaky,
+        }
+    )
+    gw.place_order(_order_request())
+    assert ids == ["TREND-rebalance-000001", "TREND-rebalance-000001"]
+
+
 def test_demo_mode_uses_the_testnet_base_url() -> None:
     gw, rec, _ = make_gateway({"/fapi/v1/time": TIME_ROUTE}, mode=Mode.DEMO)
     gw.server_time_ms()
@@ -659,6 +731,30 @@ def test_predicted_funding_uses_the_symbols_own_interval() -> None:
     assert fr.annualised() == pytest.approx(0.0004 * 8760 / 4)
 
 
+def test_predicted_funding_resolves_the_interval_without_a_prior_exchange_info_call() -> None:
+    """Section 5.6 annualises with the symbol's *own* interval.
+
+    A cold instrument cache must not fall back to 8 h for a 4 h symbol: that
+    halves ``f_i = lastFundingRate x 8760 / I_h`` and the +/-30 % haircut never
+    fires on a symbol that is paying 60 % a year.
+    """
+    gw, _, _ = make_gateway(
+        {
+            "/fapi/v1/exchangeInfo": EXCHANGE_INFO,
+            "/fapi/v1/fundingInfo": FUNDING_INFO,
+            "/fapi/v1/premiumIndex": {
+                "symbol": "OLDUSDT",
+                "markPrice": "1",
+                "lastFundingRate": "0.0004",
+                "nextFundingTime": 1800,
+            },
+        }
+    )
+    fr = gw.predicted_funding("OLDUSDT")  # no exchange_info() call first
+    assert fr.interval_hours == 4.0
+    assert fr.annualised() == pytest.approx(0.0004 * 8760 / 4)
+
+
 def test_predicted_funding_defaults_to_eight_hours_without_exchange_info() -> None:
     gw, _, _ = make_gateway(
         {"/fapi/v1/premiumIndex": [{"symbol": "BTCUSDT", "markPrice": "1", "lastFundingRate": "0"}]}
@@ -739,6 +835,44 @@ def test_positions_drops_flat_symbols() -> None:
     assert pos["BTCUSDT"].adl_quantile == 2
 
 
+def test_positions_reads_the_adl_quantile_from_its_own_endpoint() -> None:
+    """``/fapi/v2/positionRisk`` does not report it, and US-T12 AC 4 needs it:
+    a short at quantile >= 4 is reduced by 25 %, which cannot happen if every
+    position arrives at quantile 0."""
+    gw, rec, _ = make_gateway(
+        {
+            "/fapi/v2/positionRisk": [
+                {"symbol": "BTCUSDT", "positionAmt": "-0.5", "entryPrice": "30000", "markPrice": "29000"}
+            ],
+            "/fapi/v1/adlQuantile": [
+                {"symbol": "BTCUSDT", "adlQuantile": {"LONG": 0, "SHORT": 4, "BOTH": 4}},
+                {"symbol": "ETHUSDT", "adlQuantile": {"BOTH": 1}},
+            ],
+        }
+    )
+    assert gw.positions()["BTCUSDT"].adl_quantile == 4
+    assert "/fapi/v1/adlQuantile" in rec.paths()
+
+
+def test_positions_does_not_ask_for_adl_quantiles_when_the_book_is_flat() -> None:
+    gw, rec, _ = make_gateway(
+        {"/fapi/v2/positionRisk": [{"symbol": "BTCUSDT", "positionAmt": "0", "markPrice": "1"}]}
+    )
+    assert gw.positions() == {}
+    assert "/fapi/v1/adlQuantile" not in rec.paths()
+
+
+def test_positions_survive_an_unreachable_adl_endpoint() -> None:
+    gw, _, _ = make_gateway(
+        {
+            "/fapi/v2/positionRisk": [
+                {"symbol": "BTCUSDT", "positionAmt": "-0.5", "entryPrice": "30000", "markPrice": "29000"}
+            ]
+        }  # the adlQuantile route 404s
+    )
+    assert gw.positions()["BTCUSDT"].adl_quantile == 0
+
+
 def test_income_paginates_and_returns_ascending_rows() -> None:
     rows = [
         {"tranId": i, "time": DAY0 + i * 1000, "incomeType": "FUNDING_FEE", "income": "0.1"}
@@ -761,6 +895,51 @@ def test_income_deduplicates_repeated_rows() -> None:
     row = {"tranId": 1, "time": DAY0, "incomeType": "COMMISSION", "income": "-0.1"}
     gw, _, _ = make_gateway({"/fapi/v1/income": [row, row]})
     assert len(gw.income(DAY0)) == 1
+
+
+def test_income_keeps_rows_that_share_a_millisecond_across_a_page_boundary() -> None:
+    """Every funding settlement of a day carries the same ``time``.
+
+    A cursor of ``last_time + 1`` steps over the rows of that group that did not
+    fit the page; they are then missing from the ledger for ever and the
+    identity of US-T14 AC 3 cannot close.
+    """
+    settle = DAY0 + 3 * DAY_MS
+    rows = [
+        {"tranId": i, "time": settle, "incomeType": "FUNDING_FEE", "symbol": f"S{i}", "income": "-1.0"}
+        for i in range(5)
+    ]
+    rows.append({"tranId": 99, "time": settle + 1000, "incomeType": "COMMISSION", "income": "-0.1"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        q = dict(parse_qsl(urlparse(str(request.url)).query))
+        sel = [r for r in rows if r["time"] >= int(q["startTime"])]
+        return httpx.Response(200, json=sel[: int(q["limit"])])
+
+    gw, _, _ = make_gateway({"/fapi/v1/income": handler})
+    out = gw.income(settle, limit=2)  # a page that splits the 5-row settlement
+    assert [r["tranId"] for r in out] == [0, 1, 2, 3, 4, 99]
+
+
+def test_income_terminates_when_a_full_page_repeats_itself() -> None:
+    """A page that adds nothing new must step past its millisecond, not spin."""
+    settle = DAY0
+    rows = [
+        {"tranId": i, "time": settle, "incomeType": "FUNDING_FEE", "symbol": f"S{i}", "income": "-1.0"}
+        for i in range(2)
+    ]
+    gw, rec, _ = make_gateway({"/fapi/v1/income": rows})
+    out = gw.income(settle, limit=2)
+    assert [r["tranId"] for r in out] == [0, 1]
+    assert len(rec.for_path("/fapi/v1/income")) < 5
+
+
+def test_income_keeps_two_rows_that_differ_only_by_symbol() -> None:
+    same = {"tranId": 7, "time": DAY0, "incomeType": "FUNDING_FEE", "income": "-1.0"}
+    gw, _, _ = make_gateway(
+        {"/fapi/v1/income": [{**same, "symbol": "BTCUSDT"}, {**same, "symbol": "ETHUSDT"}]}
+    )
+    assert len(gw.income(DAY0)) == 2
 
 
 def test_commission_rate_is_read_from_the_exchange_and_cached() -> None:
@@ -914,6 +1093,41 @@ def test_place_order_rounds_a_sell_price_up_to_stay_passive() -> None:
     assert rec.for_path("/fapi/v1/order")[0]["price"] == "30000.20"
 
 
+def test_place_order_rounds_an_ioc_price_towards_the_book_so_it_crosses() -> None:
+    """5.9 step 3 escalates to IOC *at the current best price*.
+
+    Rounded the passive way, a buy at an off-grid ask lands below it and the IOC
+    expires unfilled; the escalation would appear to happen and do nothing.
+    """
+    gw, rec, _ = _trading_gateway()
+    gw.place_order(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=Side.BUY,
+            qty=1.0,
+            price=30_000.17,
+            time_in_force=TimeInForce.IOC,
+            intent="rebalance",
+        )
+    )
+    assert rec.for_path("/fapi/v1/order")[0]["price"] == "30000.20"  # up, onto the ask
+
+
+def test_place_order_rounds_an_ioc_sell_down_towards_the_bid() -> None:
+    gw, rec, _ = _trading_gateway()
+    gw.place_order(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=Side.SELL,
+            qty=1.0,
+            price=30_000.17,
+            time_in_force=TimeInForce.IOC,
+            intent="rebalance",
+        )
+    )
+    assert rec.for_path("/fapi/v1/order")[0]["price"] == "30000.10"
+
+
 def test_place_order_marks_reduce_only_orders() -> None:
     gw, rec, _ = _trading_gateway()
     order = gw.place_order(
@@ -1036,6 +1250,30 @@ def test_set_margin_type_treats_no_change_needed_as_success() -> None:
     gw.set_margin_type("BTCUSDT", "crossed")  # must not raise
 
 
+def test_set_margin_type_accepts_minus_4046_whatever_the_message_says() -> None:
+    """Idempotence is decided by the venue's code, not by an English sentence."""
+    gw, _, _ = make_gateway(
+        {
+            "/fapi/v1/marginType": lambda r: httpx.Response(
+                400, json={"code": -4046, "msg": "\u65e0\u9700\u66f4\u6539"}
+            )
+        }
+    )
+    gw.set_margin_type("BTCUSDT", "CROSSED")  # must not raise
+
+
+def test_a_failure_whose_message_mentions_no_change_still_propagates() -> None:
+    gw, _, _ = make_gateway(
+        {
+            "/fapi/v1/marginType": lambda r: httpx.Response(
+                400, json={"code": -4048, "msg": "No need to change: margin type is locked"}
+            )
+        }
+    )
+    with pytest.raises(GatewayError):
+        gw.set_margin_type("BTCUSDT", "CROSSED")
+
+
 def test_set_margin_type_propagates_a_real_failure() -> None:
     gw, _, _ = make_gateway(
         {
@@ -1046,6 +1284,44 @@ def test_set_margin_type_propagates_a_real_failure() -> None:
     )
     with pytest.raises(GatewayError):
         gw.set_margin_type("BTCUSDT", "CROSSED")
+
+
+def _order_ack_with(**overrides: Any) -> dict[str, Any]:
+    ack = {
+        "orderId": 5,
+        "clientOrderId": "c",
+        "symbol": "BTCUSDT",
+        "side": "BUY",
+        "type": "LIMIT",
+        "origQty": "1",
+        "price": "30000",
+        "timeInForce": "GTX",
+        "status": "NEW",
+        "executedQty": "0",
+        "updateTime": 1,
+    }
+    ack.update(overrides)
+    return ack
+
+
+def test_an_expired_in_match_status_is_read_as_expired() -> None:
+    """Binance adds statuses without notice; a new one must not be a ValueError."""
+    gw, _, _ = make_gateway({"/fapi/v1/order": _order_ack_with(status="EXPIRED_IN_MATCH")})
+    assert gw.get_order("BTCUSDT", "5").status is OrderStatus.EXPIRED
+
+
+@pytest.mark.parametrize(
+    "ack",
+    [
+        {"status": "NEW_ADL"},
+        {"type": "TRAILING_STOP_MARKET"},
+        {"timeInForce": "GTD"},
+    ],
+)
+def test_an_unknown_venue_enum_raises_a_gateway_error_not_a_value_error(ack: dict[str, Any]) -> None:
+    gw, _, _ = make_gateway({"/fapi/v1/order": _order_ack_with(**ack)})
+    with pytest.raises(GatewayError):
+        gw.get_order("BTCUSDT", "5")
 
 
 def test_user_trades_are_parsed_ascending_with_fees_and_maker_flag() -> None:
@@ -1171,6 +1447,19 @@ def test_build_gateway_paper_wraps_a_read_only_binance_client(
     assert isinstance(gw.inner, BinanceGateway)
     assert gw.inner.read_only is True
     gw.inner.close()
+
+
+def test_build_gateway_paper_constructs_the_real_paper_gateway() -> None:
+    """The stubbed-signature tests above prove nothing about the real class."""
+    from aegis.gateway.fake import FakeGateway
+    from aegis.gateway.paper import PaperGateway
+
+    clock = FakeClock(0)
+    inner = FakeGateway(clock)
+    gw = build_gateway(_cfg(Mode.PAPER), clock, inner=inner)
+    assert isinstance(gw, PaperGateway)
+    assert gw.inner is inner
+    assert gw.cfg.mode is Mode.PAPER
 
 
 def test_build_gateway_paper_uses_an_injected_inner_gateway(

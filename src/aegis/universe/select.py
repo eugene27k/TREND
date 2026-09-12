@@ -130,9 +130,7 @@ def select_universe(
     if params.volume_window_days < 1:
         # ``bars[-0:]`` is the whole history, not an empty window: an unnoticed
         # zero here would rank on 400 days instead of 30.
-        raise ConfigError(
-            f"universe.volume_window_days must be >= 1, got {params.volume_window_days}"
-        )
+        raise ConfigError(f"universe.volume_window_days must be >= 1, got {params.volume_window_days}")
     forced = tuple(params.force_include)
 
     candidates: list[_Candidate] = []

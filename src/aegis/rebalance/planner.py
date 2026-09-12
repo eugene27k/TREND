@@ -142,11 +142,7 @@ def build_plan(
     """
     by_symbol = targets.by_symbol()
     in_universe = set(universe)
-    candidates = sorted(
-        in_universe
-        | {s for s, p in positions.items() if p.qty != 0.0}
-        | set(by_symbol)
-    )
+    candidates = sorted(in_universe | {s for s, p in positions.items() if p.qty != 0.0} | set(by_symbol))
 
     legs: list[tuple[int, float, float, str, PlannedOrder]] = []
     for symbol in candidates:
@@ -259,7 +255,9 @@ def build_plan(
             info=info,
             cfg=cfg,
         )
-        legs.append((0 if risk_reducing else 1, -key if risk_reducing else -abs(delta_qty * mark), 0.0, symbol, order))
+        legs.append(
+            (0 if risk_reducing else 1, -key if risk_reducing else -abs(delta_qty * mark), 0.0, symbol, order)
+        )
 
     # Risk-reducing first by |current| descending, then risk-increasing by
     # |delta| descending; the symbol breaks ties so the plan is reproducible.

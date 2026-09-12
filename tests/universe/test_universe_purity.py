@@ -47,7 +47,9 @@ def test_us_t02_ac1_module_never_calls_datetime_now_or_touches_io() -> None:
 
 def test_us_t02_ac1_import_does_not_pull_gateway_or_storage() -> None:
     src = str(Path(select_module.__file__).parents[2])
-    probe = "import sys;import aegis.universe.select;print([m for m in sys.modules if m.startswith('aegis.')])"
+    probe = (
+        "import sys;import aegis.universe.select;print([m for m in sys.modules if m.startswith('aegis.')])"
+    )
     out = subprocess.run(  # fixed argv, no shell, offline
         [sys.executable, "-c", probe],
         capture_output=True,
@@ -69,9 +71,7 @@ def test_us_t02_ac1_selection_does_not_mutate_its_inputs() -> None:
         "AAAUSDT": make_bars("AAAUSDT", n=400, quote_volume=2e6),
         # Unsorted, with a duplicate day and a post-cut-off bar: the shapes the
         # selector normalises internally.
-        "BBBUSDT": list(
-            reversed(make_bars("BBBUSDT", n=401, quote_volume=1e6, last_day=MONTH_START))
-        )
+        "BBBUSDT": list(reversed(make_bars("BBBUSDT", n=401, quote_volume=1e6, last_day=MONTH_START)))
         + make_bars("BBBUSDT", n=1, quote_volume=1e6, last_day=MONTH_START - timedelta(days=1)),
     }
     info_snapshot = dict(exchange_info)

@@ -35,14 +35,22 @@ the engine is blocked (Invariant 1).
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date as _date
+from decimal import ROUND_HALF_UP
+from typing import Any
 
 from aegis.core.clock import add_months, at_utc, day_of
 from aegis.core.context import Context
 from aegis.core.errors import AegisError, GatewayError, OrderRejected
-from aegis.core.precision import round_price, round_qty, slippage_bps
+from aegis.core.precision import (
+    round_price,
+    round_price_marketable,
+    round_qty,
+    round_step,
+    slippage_bps,
+)
 from aegis.core.types import (
     Fill,
     Order,
@@ -252,7 +260,9 @@ class RebalanceExecutor:
     # The main loop
     # ------------------------------------------------------------------ #
 
-    def _risk_cut(self, plan: Sequence[PlannedOrder], reason: str, now_ms: int, kind: str) -> RebalanceOutcome:
+    def _risk_cut(
+        self, plan: Sequence[PlannedOrder], reason: str, now_ms: int, kind: str
+    ) -> RebalanceOutcome:
         rebalance_id = self._risk_cut_id(kind, now_ms)
         mids = {p.symbol: self._decision_mid(p.symbol) for p in plan}
         # A risk cut is bounded by the same TWAP horizon so it can never run
@@ -289,13 +299,34 @@ class RebalanceExecutor:
         escalate = escalate_s if escalate_s is not None else self.ctx.cfg.exec.escalate_s
         self._window_hit = False
 
-        for index in range(cursor, len(plan)):
+        # Symbols are worked CONCURRENTLY, in two waves. Sequentially, each symbol
+        # holds the engine for its full escalation window (5 minutes), so sixteen
+        # of them need eighty minutes against a fifty-five minute window and the
+        # rebalance could never reach the 95 % completion P1 requires — while
+        # Appendix D's own example is "100 % in 23 min" over 17 orders.
+        #
+        # Two waves rather than one pool, because 5.8 requires risk-reducing
+        # deltas to execute first: reductions free margin and shrink the book
+        # before anything grows it, which a single interleaved pool would not
+        # guarantee.
+        remaining_entries = [(i, plan[i]) for i in range(cursor, len(plan))]
+        completed: set[int] = set(range(cursor))
+        for risk_reducing in (True, False):
+            wave = [(i, p) for i, p in remaining_entries if bool(p.risk_reducing) is risk_reducing]
+            if not wave:
+                continue
             if self.ctx.clock.now_ms() >= end_ts_ms:
                 self._window_hit = True
                 break
-            self._execute_planned(rebalance_id, plan[index], decision_mids, end_ts_ms, escalate)
-            # Only now is this entry done; a crash one instruction earlier replays it.
-            self.ctx.repos.rebalances.set_cursor(rebalance_id, index + 1)
+            self._run_wave(
+                rebalance_id,
+                wave,
+                decision_mids,
+                end_ts_ms,
+                escalate,
+                completed=completed,
+                plan_len=len(plan),
+            )
 
         self._cancel_working({p.symbol for p in plan})
         return self._finish(
@@ -306,14 +337,62 @@ class RebalanceExecutor:
             kind=kind,
         )
 
-    def _execute_planned(
+    def _run_wave(
+        self,
+        rebalance_id: str,
+        wave: Sequence[tuple[int, PlannedOrder]],
+        decision_mids: dict[str, float],
+        end_ts_ms: int,
+        escalate_s: int,
+        *,
+        completed: set[int],
+        plan_len: int,
+    ) -> None:
+        """Work every symbol in the wave at once, stepping each when it is due.
+
+        Each worker is a generator that yields the timestamp it next wants to be
+        looked at — the point where a sequential executor would have slept. The
+        scheduler advances whichever workers are due and then sleeps to the
+        earliest outstanding wake-up, so the wall-clock cost of the wave is the
+        slowest single symbol rather than the sum of all of them.
+        """
+        now = self.ctx.clock.now_ms()
+        workers: list[list[Any]] = [
+            [index, self._plan_worker(rebalance_id, planned, decision_mids, end_ts_ms, escalate_s), now]
+            for index, planned in wave
+        ]
+
+        while workers:
+            now = self.ctx.clock.now_ms()
+            if now >= end_ts_ms:
+                self._window_hit = True
+                return
+            due = [w for w in workers if w[2] <= now]
+            if not due:
+                self._sleep_until(min(min(w[2] for w in workers), end_ts_ms))
+                continue
+            for worker in due:
+                try:
+                    worker[2] = max(next(worker[1]), now)
+                except StopIteration:
+                    workers.remove(worker)
+                    completed.add(worker[0])
+                    # The cursor stays a prefix: a resumed plan replays completed
+                    # entries harmlessly (their remaining quantity is already 0),
+                    # but it must never skip one that is still outstanding.
+                    cursor = 0
+                    while cursor < plan_len and cursor in completed:
+                        cursor += 1
+                    self.ctx.repos.rebalances.set_cursor(rebalance_id, cursor)
+
+    def _plan_worker(
         self,
         rebalance_id: str,
         planned: PlannedOrder,
         decision_mids: dict[str, float],
         end_ts_ms: int,
         escalate_s: int,
-    ) -> None:
+    ) -> Iterator[int]:
         info = self._symbol_info(planned.symbol)
         if info is None:
             self.ctx.alerts.warn(
@@ -345,7 +424,7 @@ class RebalanceExecutor:
             if qty <= 0.0:
                 return
 
-            result = self._run_slice(
+            result = yield from self._run_slice(
                 rebalance_id=rebalance_id,
                 planned=planned,
                 info=info,
@@ -360,9 +439,11 @@ class RebalanceExecutor:
                 return
 
             if i < n_slices - 1:
-                self._sleep_until(min(slice_start + int((i + 1) * interval_ms), end_ts_ms))
+                yield min(slice_start + int((i + 1) * interval_ms), end_ts_ms)
 
-    def _slice_qty(self, remaining: float, slices_left: int, info: SymbolInfo, planned: PlannedOrder) -> float:
+    def _slice_qty(
+        self, remaining: float, slices_left: int, info: SymbolInfo, planned: PlannedOrder
+    ) -> float:
         """Even split of what is *actually* left, floored onto the lot grid.
 
         A split so small the venue would refuse it (minQty / minNotional) is
@@ -370,20 +451,24 @@ class RebalanceExecutor:
         optimisation, and it must never stop the plan from executing. A closing
         order is sent whole whatever its notional: the position has to go.
         """
-        target = abs(remaining) / max(1, slices_left)
-        qty = round_qty(target, info)
+        # Nearest-tick rather than floor: the target was already floored onto the
+        # grid by the planner, so what is left here is float noise, and flooring
+        # it again would shave a lot off every slice and leave a dust position.
+        # The result is still clamped to the remainder, so it cannot over-trade.
+        rest = round_step(abs(remaining), info.step_size, mode=ROUND_HALF_UP)
+        qty = min(round_step(rest / max(1, slices_left), info.step_size, mode=ROUND_HALF_UP), rest)
         price = self._reference_price(planned.symbol)
         closing = planned.target_qty == 0.0
 
         if qty < info.min_qty - _QTY_TOL or (price > 0 and qty * price < info.min_notional - _QTY_TOL):
-            qty = round_qty(abs(remaining), info)
+            qty = rest  # too small to be accepted on its own: send the remainder whole
         if qty <= 0.0:
             return 0.0
         if closing:
-            return min(qty, abs(remaining))
+            return qty
         if qty < info.min_qty - _QTY_TOL or (price > 0 and qty * price < info.min_notional - _QTY_TOL):
             return 0.0
-        return min(qty, abs(remaining))
+        return qty
 
     def _remaining_qty(self, planned: PlannedOrder) -> float:
         """Signed quantity still to trade, measured against the exchange position.
@@ -418,7 +503,8 @@ class RebalanceExecutor:
         decision_mid: float,
         end_ts_ms: int,
         escalate_s: int,
-    ) -> _SliceResult:
+    ) -> Iterator[int]:
+        """Yields the timestamp it next wants to run at; returns its ``_SliceResult``."""
         repos = self.ctx.repos
         clock = self.ctx.clock
         slice_id = f"{rebalance_id}:{planned.symbol}:{seq}"
@@ -481,9 +567,7 @@ class RebalanceExecutor:
                     repos.slices.bump_repegs(slice_id)
                     remaining = round_qty(order.remaining_qty, info)
                     if remaining <= 0 or not self._tradeable(remaining, planned.symbol, info):
-                        outcome = (
-                            SliceOutcome.FILLED if order.filled_qty > 0 else SliceOutcome.CANCELLED
-                        )
+                        outcome = SliceOutcome.FILLED if order.filled_qty > 0 else SliceOutcome.CANCELLED
                         break
                     try:
                         replacement = self._place_passive(
@@ -497,12 +581,10 @@ class RebalanceExecutor:
                     order = replacement
                     continue
 
-            self._sleep_until(min(clock.now_ms() + self.ctx.cfg.exec.repeg_s * 1000, deadline, end_ts_ms))
+            yield min(clock.now_ms() + self.ctx.cfg.exec.repeg_s * 1000, deadline, end_ts_ms)
             waited = True
 
-        filled, avg_price = self._record_fills(
-            planned, slice_id, rebalance_id, decision_mid, placed_ts
-        )
+        filled, avg_price = self._record_fills(planned, slice_id, rebalance_id, decision_mid, placed_ts)
         repos.slices.finish(slice_id, str(outcome), filled, avg_price, taker, clock.now_ms())
         return _SliceResult(filled)
 
@@ -515,8 +597,12 @@ class RebalanceExecutor:
         self.ctx.alerts.warn(
             code,
             f"{planned.symbol} slice rejected ({exc.code}): {exc}",
-            {"symbol": planned.symbol, "slice_id": slice_id, "code": exc.code,
-             "reduce_only": planned.reduce_only},
+            {
+                "symbol": planned.symbol,
+                "slice_id": slice_id,
+                "code": exc.code,
+                "reduce_only": planned.reduce_only,
+            },
         )
         return _SliceResult(0.0, abandon=True)
 
@@ -543,14 +629,17 @@ class RebalanceExecutor:
         price = round_price(book.passive_price(side), info, side)
         step = info.tick_size if side is Side.SELL else -info.tick_size
 
-        for attempt in range(MAX_POST_ONLY_RETRIES):
+        for _ in range(MAX_POST_ONLY_RETRIES):
             try:
                 return self._send(planned, side, qty, price, TimeInForce.GTX, slice_id, rebalance_id)
             except OrderRejected as exc:
                 if not exc.is_post_only_violation:
                     raise
                 self.ctx.repos.slices.bump_repegs(slice_id)
-                price = round_price(price + step * (attempt + 1), info, side)
+                # One tick further from the touch. Snapped half-up because the
+                # arithmetic result is already a grid multiple bar float noise,
+                # which a directional rounding would turn into a second tick.
+                price = round_step(price + step, info.tick_size, mode=ROUND_HALF_UP)
         return None
 
     def _place_taker(
@@ -563,9 +652,10 @@ class RebalanceExecutor:
         rebalance_id: str,
     ) -> Order:
         book = self.ctx.gateway.book_ticker(planned.symbol)
-        # No side-conservative rounding here: a taker price must stay marketable,
-        # so it is snapped to the nearest tick rather than away from the book.
-        price = round_price(book.aggressive_price(side), info)
+        # Rounded *towards* the book, not to the nearest tick: an IOC that lands a
+        # hair on the passive side of the touch is expired, not filled, so the
+        # escalation would appear to happen and quietly do nothing.
+        price = round_price_marketable(book.aggressive_price(side), info, side)
         return self._send(planned, side, qty, price, TimeInForce.IOC, slice_id, rebalance_id)
 
     def _send(
@@ -623,7 +713,11 @@ class RebalanceExecutor:
             self._cancel(order)
 
     def _record_fills(
-        self, planned: PlannedOrder, slice_id: str, rebalance_id: str, decision_mid: float,
+        self,
+        planned: PlannedOrder,
+        slice_id: str,
+        rebalance_id: str,
+        decision_mid: float,
         since_ms: int,
     ) -> tuple[float, float]:
         """Store this slice's prints with slippage against the decision mid (5.9 step 1)."""
@@ -700,9 +794,7 @@ class RebalanceExecutor:
         traded = sum(abs(f.qty * f.price) for f in fills)
         fees = sum(f.fee for f in fills)
         maker = sum(abs(f.qty * f.price) for f in fills if f.is_maker)
-        avg_slip = (
-            sum(f.slippage_bps * abs(f.qty * f.price) for f in fills) / traded if traded > 0 else 0.0
-        )
+        avg_slip = sum(f.slippage_bps * abs(f.qty * f.price) for f in fills) / traded if traded > 0 else 0.0
         maker_ratio = maker / traded if traded > 0 else 0.0
         completion = 100.0 * traded / planned_notional if planned_notional > 0 else 100.0
         status = RebalanceStatus.WINDOW_END if self._window_hit else RebalanceStatus.COMPLETE
@@ -748,9 +840,7 @@ class RebalanceExecutor:
         """Three consecutive days short of tolerance flags the symbol (5.9 step 6)."""
         cfg = self.ctx.cfg
         day = day_of(now_ms)
-        window = [
-            (day.toordinal() - offset) for offset in range(cfg.rebalance.illiquid_days)
-        ]
+        window = [(day.toordinal() - offset) for offset in range(cfg.rebalance.illiquid_days)]
         days = [_ordinal_iso(o) for o in window]
         for residual in residuals:
             symbol = str(residual["symbol"])

@@ -75,9 +75,25 @@ class SymbolMetaRepo(_Repo):
             " quantity_precision, onboard_date_ms, maker_fee, taker_fee, funding_interval_hours, updated_ts)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             [
-                (self.s, i.symbol, i.base_asset, i.quote_asset, i.status, i.contract_type, i.tick_size,
-                 i.step_size, i.min_qty, i.min_notional, i.price_precision, i.quantity_precision,
-                 i.onboard_date_ms, i.maker_fee, i.taker_fee, i.funding_interval_hours, ts_ms)
+                (
+                    self.s,
+                    i.symbol,
+                    i.base_asset,
+                    i.quote_asset,
+                    i.status,
+                    i.contract_type,
+                    i.tick_size,
+                    i.step_size,
+                    i.min_qty,
+                    i.min_notional,
+                    i.price_precision,
+                    i.quantity_precision,
+                    i.onboard_date_ms,
+                    i.maker_fee,
+                    i.taker_fee,
+                    i.funding_interval_hours,
+                    ts_ms,
+                )
                 for i in infos
             ],
         )
@@ -95,11 +111,20 @@ class SymbolMetaRepo(_Repo):
     @staticmethod
     def _to_info(r: dict[str, Any]) -> SymbolInfo:
         return SymbolInfo(
-            symbol=r["symbol"], base_asset=r["base_asset"], quote_asset=r["quote_asset"],
-            status=r["status"], contract_type=r["contract_type"], tick_size=r["tick_size"],
-            step_size=r["step_size"], min_qty=r["min_qty"], min_notional=r["min_notional"],
-            price_precision=r["price_precision"], quantity_precision=r["quantity_precision"],
-            onboard_date_ms=r["onboard_date_ms"], maker_fee=r["maker_fee"], taker_fee=r["taker_fee"],
+            symbol=r["symbol"],
+            base_asset=r["base_asset"],
+            quote_asset=r["quote_asset"],
+            status=r["status"],
+            contract_type=r["contract_type"],
+            tick_size=r["tick_size"],
+            step_size=r["step_size"],
+            min_qty=r["min_qty"],
+            min_notional=r["min_notional"],
+            price_precision=r["price_precision"],
+            quantity_precision=r["quantity_precision"],
+            onboard_date_ms=r["onboard_date_ms"],
+            maker_fee=r["maker_fee"],
+            taker_fee=r["taker_fee"],
             funding_interval_hours=r["funding_interval_hours"],
         )
 
@@ -112,8 +137,7 @@ class SymbolMetaRepo(_Repo):
 class LedgerRepo(_Repo):
     def add_many(self, entries: Iterable[LedgerEntry]) -> int:
         rows = [
-            (self.s, e.ts_ms, str(e.income_type), e.asset, e.amount, e.symbol, e.tran_id,
-             e.trade_id, e.info)
+            (self.s, e.ts_ms, str(e.income_type), e.asset, e.amount, e.symbol, e.tran_id, e.trade_id, e.info)
             for e in entries
         ]
         if not rows:
@@ -167,18 +191,39 @@ class LedgerRepo(_Repo):
 
 
 class SnapshotRepo(_Repo):
-    def add(self, account: AccountState, positions: Sequence[Position], *, gross: float = 0.0,
-            net: float = 0.0) -> None:
+    def add(
+        self, account: AccountState, positions: Sequence[Position], *, gross: float = 0.0, net: float = 0.0
+    ) -> None:
         self.db.execute(
             "INSERT INTO snapshots (strategy, ts, wallet_balance, margin_balance, unrealized_pnl,"
             " available_balance, maint_margin, initial_margin, gross_notional, net_notional,"
             " margin_ratio, positions_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (self.s, account.ts_ms, account.wallet_balance, account.margin_balance,
-             account.unrealized_pnl, account.available_balance, account.maint_margin,
-             account.initial_margin, gross, net, account.margin_ratio,
-             json_dumps([{"symbol": p.symbol, "qty": p.qty, "entry": p.entry_price,
-                          "mark": p.mark_price, "upnl": p.unrealized_pnl,
-                          "adl": p.adl_quantile} for p in positions])),
+            (
+                self.s,
+                account.ts_ms,
+                account.wallet_balance,
+                account.margin_balance,
+                account.unrealized_pnl,
+                account.available_balance,
+                account.maint_margin,
+                account.initial_margin,
+                gross,
+                net,
+                account.margin_ratio,
+                json_dumps(
+                    [
+                        {
+                            "symbol": p.symbol,
+                            "qty": p.qty,
+                            "entry": p.entry_price,
+                            "mark": p.mark_price,
+                            "upnl": p.unrealized_pnl,
+                            "adl": p.adl_quantile,
+                        }
+                        for p in positions
+                    ]
+                ),
+            ),
         )
 
     def latest(self) -> dict[str, Any] | None:
@@ -200,9 +245,7 @@ class SnapshotRepo(_Repo):
 
     def first(self) -> dict[str, Any] | None:
         """Oldest snapshot — the anchor the balance reconciliation sums forward from."""
-        return self.db.query_one(
-            "SELECT * FROM snapshots WHERE strategy = ? ORDER BY ts LIMIT 1", (self.s,)
-        )
+        return self.db.query_one("SELECT * FROM snapshots WHERE strategy = ? ORDER BY ts LIMIT 1", (self.s,))
 
 
 class EquityCurveRepo(_Repo):
@@ -210,8 +253,17 @@ class EquityCurveRepo(_Repo):
         self.db.execute(
             "INSERT OR REPLACE INTO equity_curve (strategy, day, ts, equity, net_transfer,"
             " twr_factor, twr_index, peak_index, drawdown) VALUES (?,?,?,?,?,?,?,?,?)",
-            (self.s, _day(day), point.ts_ms, point.equity, point.net_transfer, point.twr_factor,
-             point.twr_index, peak_index, drawdown),
+            (
+                self.s,
+                _day(day),
+                point.ts_ms,
+                point.equity,
+                point.net_transfer,
+                point.twr_factor,
+                point.twr_index,
+                peak_index,
+                drawdown,
+            ),
         )
 
     def all(self) -> list[dict[str, Any]]:
@@ -224,8 +276,13 @@ class EquityCurveRepo(_Repo):
 
     def points(self) -> list[EquityPoint]:
         return [
-            EquityPoint(ts_ms=r["ts"], equity=r["equity"], net_transfer=r["net_transfer"],
-                        twr_factor=r["twr_factor"], twr_index=r["twr_index"])
+            EquityPoint(
+                ts_ms=r["ts"],
+                equity=r["equity"],
+                net_transfer=r["net_transfer"],
+                twr_factor=r["twr_factor"],
+                twr_index=r["twr_index"],
+            )
             for r in self.all()
         ]
 
@@ -242,11 +299,26 @@ class OrderRepo(_Repo):
             " order_type, qty, price, time_in_force, reduce_only, status, filled_qty, avg_price,"
             " created_ts, updated_ts, rebalance_id, slice_id, intent)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (self.s, order.order_id, order.client_order_id, order.symbol, str(order.side),
-             str(order.order_type), order.qty, order.price, str(order.time_in_force),
-             int(order.reduce_only), str(order.status), order.filled_qty, order.avg_price,
-             order.created_ts_ms, order.updated_ts_ms, order.rebalance_id, order.slice_id,
-             order.intent),
+            (
+                self.s,
+                order.order_id,
+                order.client_order_id,
+                order.symbol,
+                str(order.side),
+                str(order.order_type),
+                order.qty,
+                order.price,
+                str(order.time_in_force),
+                int(order.reduce_only),
+                str(order.status),
+                order.filled_qty,
+                order.avg_price,
+                order.created_ts_ms,
+                order.updated_ts_ms,
+                order.rebalance_id,
+                order.slice_id,
+                order.intent,
+            ),
         )
 
     def get(self, order_id: str) -> Order | None:
@@ -273,22 +345,48 @@ class OrderRepo(_Repo):
     @staticmethod
     def _to_order(r: dict[str, Any]) -> Order:
         return Order(
-            order_id=r["order_id"], client_order_id=r["client_order_id"], symbol=r["symbol"],
-            side=Side(r["side"]), order_type=OrderType(r["order_type"]), qty=r["qty"],
-            price=r["price"], time_in_force=TimeInForce(r["time_in_force"]),
-            reduce_only=bool(r["reduce_only"]), status=OrderStatus(r["status"]),
-            filled_qty=r["filled_qty"], avg_price=r["avg_price"], created_ts_ms=r["created_ts"],
-            updated_ts_ms=r["updated_ts"], strategy=Strategy(r["strategy"]),
-            rebalance_id=r["rebalance_id"], slice_id=r["slice_id"], intent=r["intent"],
+            order_id=r["order_id"],
+            client_order_id=r["client_order_id"],
+            symbol=r["symbol"],
+            side=Side(r["side"]),
+            order_type=OrderType(r["order_type"]),
+            qty=r["qty"],
+            price=r["price"],
+            time_in_force=TimeInForce(r["time_in_force"]),
+            reduce_only=bool(r["reduce_only"]),
+            status=OrderStatus(r["status"]),
+            filled_qty=r["filled_qty"],
+            avg_price=r["avg_price"],
+            created_ts_ms=r["created_ts"],
+            updated_ts_ms=r["updated_ts"],
+            strategy=Strategy(r["strategy"]),
+            rebalance_id=r["rebalance_id"],
+            slice_id=r["slice_id"],
+            intent=r["intent"],
         )
 
 
 class FillRepo(_Repo):
     def add_many(self, fills: Iterable[Fill]) -> int:
         rows = [
-            (self.s, f.trade_id, f.order_id, f.symbol, str(f.side), f.qty, f.price, f.fee,
-             f.fee_asset, int(f.is_maker), f.realized_pnl, f.ts_ms, f.rebalance_id, f.slice_id,
-             f.decision_mid, f.slippage_bps)
+            (
+                self.s,
+                f.trade_id,
+                f.order_id,
+                f.symbol,
+                str(f.side),
+                f.qty,
+                f.price,
+                f.fee,
+                f.fee_asset,
+                int(f.is_maker),
+                f.realized_pnl,
+                f.ts_ms,
+                f.rebalance_id,
+                f.slice_id,
+                f.decision_mid,
+                f.slippage_bps,
+            )
             for f in fills
         ]
         if not rows:
@@ -331,11 +429,22 @@ class FillRepo(_Repo):
     @staticmethod
     def _to_fill(r: dict[str, Any]) -> Fill:
         return Fill(
-            trade_id=r["trade_id"], order_id=r["order_id"], symbol=r["symbol"], side=Side(r["side"]),
-            qty=r["qty"], price=r["price"], fee=r["fee"], fee_asset=r["fee_asset"],
-            is_maker=bool(r["is_maker"]), ts_ms=r["ts"], realized_pnl=r["realized_pnl"],
-            strategy=Strategy(r["strategy"]), rebalance_id=r["rebalance_id"],
-            slice_id=r["slice_id"], decision_mid=r["decision_mid"], slippage_bps=r["slippage_bps"],
+            trade_id=r["trade_id"],
+            order_id=r["order_id"],
+            symbol=r["symbol"],
+            side=Side(r["side"]),
+            qty=r["qty"],
+            price=r["price"],
+            fee=r["fee"],
+            fee_asset=r["fee_asset"],
+            is_maker=bool(r["is_maker"]),
+            ts_ms=r["ts"],
+            realized_pnl=r["realized_pnl"],
+            strategy=Strategy(r["strategy"]),
+            rebalance_id=r["rebalance_id"],
+            slice_id=r["slice_id"],
+            decision_mid=r["decision_mid"],
+            slippage_bps=r["slippage_bps"],
         )
 
 
@@ -347,19 +456,37 @@ class PositionRepo(_Repo):
                 "INSERT INTO positions (strategy, symbol, qty, entry_price, mark_price,"
                 " unrealized_pnl, leverage, liquidation_price, adl_quantile, ts)"
                 " VALUES (?,?,?,?,?,?,?,?,?,?)",
-                [(self.s, p.symbol, p.qty, p.entry_price, p.mark_price, p.unrealized_pnl,
-                  p.leverage, p.liquidation_price, p.adl_quantile, ts_ms)
-                 for p in positions if p.qty != 0.0],
+                [
+                    (
+                        self.s,
+                        p.symbol,
+                        p.qty,
+                        p.entry_price,
+                        p.mark_price,
+                        p.unrealized_pnl,
+                        p.leverage,
+                        p.liquidation_price,
+                        p.adl_quantile,
+                        ts_ms,
+                    )
+                    for p in positions
+                    if p.qty != 0.0
+                ],
             )
 
     def all(self) -> dict[str, Position]:
         rows = self.db.query("SELECT * FROM positions WHERE strategy = ?", (self.s,))
         return {
             r["symbol"]: Position(
-                symbol=r["symbol"], qty=r["qty"], entry_price=r["entry_price"],
-                mark_price=r["mark_price"], unrealized_pnl=r["unrealized_pnl"],
-                leverage=r["leverage"], liquidation_price=r["liquidation_price"],
-                adl_quantile=r["adl_quantile"], ts_ms=r["ts"],
+                symbol=r["symbol"],
+                qty=r["qty"],
+                entry_price=r["entry_price"],
+                mark_price=r["mark_price"],
+                unrealized_pnl=r["unrealized_pnl"],
+                leverage=r["leverage"],
+                liquidation_price=r["liquidation_price"],
+                adl_quantile=r["adl_quantile"],
+                ts_ms=r["ts"],
             )
             for r in rows
         }
@@ -376,8 +503,20 @@ class UniverseRepo(_Repo):
             "INSERT OR REPLACE INTO universe_history (strategy, month, symbol, rank,"
             " median_quote_volume_30d, history_days, included, reason, created_ts)"
             " VALUES (?,?,?,?,?,?,?,?,?)",
-            [(self.s, result.month, e.symbol, e.rank, e.median_quote_volume_30d, e.history_days,
-              int(e.included), e.reason, now_ms) for e in result.entries],
+            [
+                (
+                    self.s,
+                    result.month,
+                    e.symbol,
+                    e.rank,
+                    e.median_quote_volume_30d,
+                    e.history_days,
+                    int(e.included),
+                    e.reason,
+                    now_ms,
+                )
+                for e in result.entries
+            ],
         )
 
     def month(self, month: str) -> UniverseResult | None:
@@ -390,10 +529,14 @@ class UniverseRepo(_Repo):
         return UniverseResult(
             month=month,
             entries=tuple(
-                UniverseEntry(symbol=r["symbol"], rank=r["rank"],
-                              median_quote_volume_30d=r["median_quote_volume_30d"],
-                              history_days=r["history_days"], included=bool(r["included"]),
-                              reason=r["reason"])
+                UniverseEntry(
+                    symbol=r["symbol"],
+                    rank=r["rank"],
+                    median_quote_volume_30d=r["median_quote_volume_30d"],
+                    history_days=r["history_days"],
+                    included=bool(r["included"]),
+                    reason=r["reason"],
+                )
                 for r in rows
             ),
         )
@@ -407,9 +550,7 @@ class UniverseRepo(_Repo):
         return [r["symbol"] for r in rows]
 
     def latest_month(self) -> str | None:
-        return self.db.scalar(
-            "SELECT MAX(month) FROM universe_history WHERE strategy = ?", (self.s,)
-        )
+        return self.db.scalar("SELECT MAX(month) FROM universe_history WHERE strategy = ?", (self.s,))
 
     def months(self) -> list[str]:
         return [
@@ -427,13 +568,34 @@ class BarRepo(_Repo):
             "INSERT OR REPLACE INTO daily_bars (strategy, symbol, day, open, high, low, close,"
             " volume, quote_volume, open_time, close_time, source, filled)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [(self.s, b.symbol, _day(b.day), b.open, b.high, b.low, b.close, b.volume,
-              b.quote_volume, b.open_time_ms, b.close_time_ms, b.source, int(b.filled))
-             for b in bars],
+            [
+                (
+                    self.s,
+                    b.symbol,
+                    _day(b.day),
+                    b.open,
+                    b.high,
+                    b.low,
+                    b.close,
+                    b.volume,
+                    b.quote_volume,
+                    b.open_time_ms,
+                    b.close_time_ms,
+                    b.source,
+                    int(b.filled),
+                )
+                for b in bars
+            ],
         )
 
-    def series(self, symbol: str, *, start: date | str | None = None,
-               end: date | str | None = None, limit: int | None = None) -> list[DailyBar]:
+    def series(
+        self,
+        symbol: str,
+        *,
+        start: date | str | None = None,
+        end: date | str | None = None,
+        limit: int | None = None,
+    ) -> list[DailyBar]:
         sql = "SELECT * FROM daily_bars WHERE strategy = ? AND symbol = ?"
         params: list[Any] = [self.s, symbol]
         if start is not None:
@@ -448,12 +610,17 @@ class BarRepo(_Repo):
             rows = rows[-limit:]
         return [self._to_bar(r) for r in rows]
 
-    def closes(self, symbol: str, *, end: date | str | None = None,
-               limit: int | None = None) -> list[float]:
+    def closes(self, symbol: str, *, end: date | str | None = None, limit: int | None = None) -> list[float]:
         return [b.close for b in self.series(symbol, end=end, limit=limit)]
 
-    def realised_series(self, symbol: str, *, start: date | str | None = None,
-                        end: date | str | None = None, limit: int | None = None) -> list[DailyBar]:
+    def realised_series(
+        self,
+        symbol: str,
+        *,
+        start: date | str | None = None,
+        end: date | str | None = None,
+        limit: int | None = None,
+    ) -> list[DailyBar]:
         """Bars that actually traded — forward-filled rows excluded (US-T03 AC 2).
 
         Separate from ``series`` rather than a flag on it so that P&L, fee and
@@ -481,22 +648,35 @@ class BarRepo(_Repo):
         )
 
     def has_day(self, symbol: str, day: date | str) -> bool:
-        return bool(self.db.scalar(
-            "SELECT 1 FROM daily_bars WHERE strategy = ? AND symbol = ? AND day = ?",
-            (self.s, symbol, _day(day)),
-        ))
+        return bool(
+            self.db.scalar(
+                "SELECT 1 FROM daily_bars WHERE strategy = ? AND symbol = ? AND day = ?",
+                (self.s, symbol, _day(day)),
+            )
+        )
 
     def count(self, symbol: str) -> int:
-        return int(self.db.scalar(
-            "SELECT COUNT(*) FROM daily_bars WHERE strategy = ? AND symbol = ?", (self.s, symbol)
-        ) or 0)
+        return int(
+            self.db.scalar(
+                "SELECT COUNT(*) FROM daily_bars WHERE strategy = ? AND symbol = ?", (self.s, symbol)
+            )
+            or 0
+        )
 
     @staticmethod
     def _to_bar(r: dict[str, Any]) -> DailyBar:
         return DailyBar(
-            symbol=r["symbol"], day=date.fromisoformat(r["day"]), open=r["open"], high=r["high"],
-            low=r["low"], close=r["close"], volume=r["volume"], quote_volume=r["quote_volume"],
-            open_time_ms=r["open_time"], close_time_ms=r["close_time"], source=r["source"],
+            symbol=r["symbol"],
+            day=date.fromisoformat(r["day"]),
+            open=r["open"],
+            high=r["high"],
+            low=r["low"],
+            close=r["close"],
+            volume=r["volume"],
+            quote_volume=r["quote_volume"],
+            open_time_ms=r["open_time"],
+            close_time_ms=r["close_time"],
+            source=r["source"],
             filled=bool(r["filled"]),
         )
 
@@ -509,8 +689,21 @@ class SignalRepo(_Repo):
             y = list(r.y) + [None] * 3
             z = list(r.z) + [None] * 3
             u = list(r.u) + [None] * 3
-            rows.append((self.s, _day(day), r.symbol, *_nan(x[:3]), *_nan(y[:3]), *_nan(z[:3]),
-                         *_nan(u[:3]), r.signal, int(r.warm), r.bar_ts_ms, now_ms))
+            rows.append(
+                (
+                    self.s,
+                    _day(day),
+                    r.symbol,
+                    *_nan(x[:3]),
+                    *_nan(y[:3]),
+                    *_nan(z[:3]),
+                    *_nan(u[:3]),
+                    r.signal,
+                    int(r.warm),
+                    r.bar_ts_ms,
+                    now_ms,
+                )
+            )
         self.db.executemany(
             "INSERT OR REPLACE INTO signal_snapshots (strategy, day, symbol, x1,x2,x3, y1,y2,y3,"
             " z1,z2,z3, u1,u2,u3, signal, warm, bar_ts, created_ts)"
@@ -526,8 +719,7 @@ class SignalRepo(_Repo):
 
     def history(self, symbol: str, limit: int = 90) -> list[dict[str, Any]]:
         rows = self.db.query(
-            "SELECT * FROM signal_snapshots WHERE strategy = ? AND symbol = ? ORDER BY day DESC"
-            " LIMIT ?",
+            "SELECT * FROM signal_snapshots WHERE strategy = ? AND symbol = ? ORDER BY day DESC LIMIT ?",
             (self.s, symbol, limit),
         )
         return list(reversed(rows))
@@ -561,8 +753,15 @@ class RiskModelRepo(_Repo):
         self.db.execute(
             "INSERT OR REPLACE INTO risk_model_snapshots (strategy, day, vols_json, corr_json,"
             " symbols_json, avg_corr, created_ts) VALUES (?,?,?,?,?,?,?)",
-            (self.s, _day(day), json_dumps(model.vols), json_dumps([list(r) for r in model.corr]),
-             json_dumps(list(model.symbols)), model.avg_corr, now_ms),
+            (
+                self.s,
+                _day(day),
+                json_dumps(model.vols),
+                json_dumps([list(r) for r in model.corr]),
+                json_dumps(list(model.symbols)),
+                model.avg_corr,
+                now_ms,
+            ),
         )
 
     def get(self, day: date | str) -> RiskModel | None:
@@ -573,7 +772,8 @@ class RiskModelRepo(_Repo):
             return None
         symbols = tuple(json_loads(row["symbols_json"], []))
         return RiskModel(
-            symbols=symbols, vols=json_loads(row["vols_json"], {}),
+            symbols=symbols,
+            vols=json_loads(row["vols_json"], {}),
             corr=tuple(tuple(r) for r in json_loads(row["corr_json"], [])),
             avg_corr=row["avg_corr"],
         )
@@ -584,16 +784,36 @@ class RiskModelRepo(_Repo):
 
 
 class RebalanceRepo(_Repo):
-    def create(self, rebalance_id: str, day: date | str, started_ts: int, *, kind: str = "scheduled",
-               equity: float = 0.0, governor_g: float = 1.0, order_plan: Any = (),
-               decision_mids: dict[str, float] | None = None, planned_notional: float = 0.0) -> None:
+    def create(
+        self,
+        rebalance_id: str,
+        day: date | str,
+        started_ts: int,
+        *,
+        kind: str = "scheduled",
+        equity: float = 0.0,
+        governor_g: float = 1.0,
+        order_plan: Any = (),
+        decision_mids: dict[str, float] | None = None,
+        planned_notional: float = 0.0,
+    ) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO rebalances (strategy, rebalance_id, day, started_ts, status,"
             " kind, order_plan_json, equity, governor_g, decision_mids_json, planned_notional, cursor)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,0)",
-            (self.s, rebalance_id, _day(day), started_ts, "planned", kind,
-             json_dumps(_plan_rows(order_plan)), equity, governor_g,
-             json_dumps(decision_mids or {}), planned_notional),
+            (
+                self.s,
+                rebalance_id,
+                _day(day),
+                started_ts,
+                "planned",
+                kind,
+                json_dumps(_plan_rows(order_plan)),
+                equity,
+                governor_g,
+                json_dumps(decision_mids or {}),
+                planned_notional,
+            ),
         )
 
     def set_status(self, rebalance_id: str, status: str, *, ended_ts: int | None = None) -> None:
@@ -609,15 +829,35 @@ class RebalanceRepo(_Repo):
             (cursor, self.s, rebalance_id),
         )
 
-    def finish(self, rebalance_id: str, *, ended_ts: int, status: str, completion_pct: float,
-               traded_notional: float, fees: float, avg_slippage_bps: float, maker_ratio: float,
-               residuals: Any) -> None:
+    def finish(
+        self,
+        rebalance_id: str,
+        *,
+        ended_ts: int,
+        status: str,
+        completion_pct: float,
+        traded_notional: float,
+        fees: float,
+        avg_slippage_bps: float,
+        maker_ratio: float,
+        residuals: Any,
+    ) -> None:
         self.db.execute(
             "UPDATE rebalances SET ended_ts = ?, status = ?, completion_pct = ?,"
             " traded_notional = ?, fees = ?, avg_slippage_bps = ?, maker_ratio = ?,"
             " residuals_json = ? WHERE strategy = ? AND rebalance_id = ?",
-            (ended_ts, status, completion_pct, traded_notional, fees, avg_slippage_bps,
-             maker_ratio, json_dumps(residuals), self.s, rebalance_id),
+            (
+                ended_ts,
+                status,
+                completion_pct,
+                traded_notional,
+                fees,
+                avg_slippage_bps,
+                maker_ratio,
+                json_dumps(residuals),
+                self.s,
+                rebalance_id,
+            ),
         )
 
     def get(self, rebalance_id: str) -> dict[str, Any] | None:
@@ -655,6 +895,29 @@ class RebalanceRepo(_Repo):
         sql += " ORDER BY day, started_ts"
         return self.db.query(sql, params)
 
+    def count(self, *, kind: str | None = None, status: str | None = None) -> int:
+        """How many rebalances match — the P1 gate counts completed scheduled ones."""
+        sql = "SELECT COUNT(*) FROM rebalances WHERE strategy = ?"
+        params: list[Any] = [self.s]
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind)
+        if status is not None:
+            sql += " AND status = ?"
+            params.append(status)
+        return int(self.db.scalar(sql, params) or 0)
+
+    def avg_completion(self, *, kind: str = "scheduled") -> float | None:
+        """Mean completion % over finished rebalances; None when there are none."""
+        row = self.db.query_one(
+            "SELECT AVG(completion_pct) AS avg_pct, COUNT(*) AS n FROM rebalances"
+            " WHERE strategy = ? AND kind = ? AND ended_ts IS NOT NULL",
+            (self.s, kind),
+        )
+        if not row or not row["n"]:
+            return None
+        return float(row["avg_pct"] or 0.0)
+
     def consecutive_failures(self, before_day: date | str, threshold_pct: float, days: int) -> int:
         """How many of the last ``days`` scheduled rebalances fell below ``threshold_pct``."""
         rows = self.db.query(
@@ -677,12 +940,21 @@ def _plan_rows(plan: Any) -> list[dict[str, Any]]:
         if isinstance(p, dict):
             out.append(p)
         else:
-            out.append({
-                "symbol": p.symbol, "side": str(p.side), "delta_notional": p.delta_notional,
-                "delta_qty": p.delta_qty, "current_qty": p.current_qty, "target_qty": p.target_qty,
-                "reduce_only": p.reduce_only, "risk_reducing": p.risk_reducing,
-                "sequence": p.sequence, "n_slices": p.n_slices, "clip_qty": p.clip_qty,
-            })
+            out.append(
+                {
+                    "symbol": p.symbol,
+                    "side": str(p.side),
+                    "delta_notional": p.delta_notional,
+                    "delta_qty": p.delta_qty,
+                    "current_qty": p.current_qty,
+                    "target_qty": p.target_qty,
+                    "reduce_only": p.reduce_only,
+                    "risk_reducing": p.risk_reducing,
+                    "sequence": p.sequence,
+                    "n_slices": p.n_slices,
+                    "clip_qty": p.clip_qty,
+                }
+            )
     return out
 
 
@@ -693,11 +965,30 @@ class TargetRepo(_Repo):
             " sigma_p, conv, sigma_eff, s, g, caps_json, funding_ann, funding_haircut,"
             " target_notional, target_qty, current_qty, delta_notional, traded)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            [(self.s, rebalance_id, t.symbol, t.signal, t.vol, t.raw, targets.sigma_p, targets.conv,
-              targets.sigma_eff, targets.s, targets.g, json_dumps(list(t.caps_applied)),
-              t.funding_ann, t.funding_haircut, t.target_notional, t.target_qty, t.current_qty,
-              t.delta_notional, int(t.traded))
-             for t in targets.targets],
+            [
+                (
+                    self.s,
+                    rebalance_id,
+                    t.symbol,
+                    t.signal,
+                    t.vol,
+                    t.raw,
+                    targets.sigma_p,
+                    targets.conv,
+                    targets.sigma_eff,
+                    targets.s,
+                    targets.g,
+                    json_dumps(list(t.caps_applied)),
+                    t.funding_ann,
+                    t.funding_haircut,
+                    t.target_notional,
+                    t.target_qty,
+                    t.current_qty,
+                    t.delta_notional,
+                    int(t.traded),
+                )
+                for t in targets.targets
+            ],
         )
 
     def mark_traded(self, rebalance_id: str, symbol: str, traded: bool = True) -> None:
@@ -725,8 +1016,17 @@ class TargetRepo(_Repo):
 
 
 class SliceRepo(_Repo):
-    def create(self, slice_id: str, rebalance_id: str, symbol: str, seq: int, side: Side, qty: float,
-               reduce_only: bool, placed_ts: int) -> None:
+    def create(
+        self,
+        slice_id: str,
+        rebalance_id: str,
+        symbol: str,
+        seq: int,
+        side: Side,
+        qty: float,
+        reduce_only: bool,
+        placed_ts: int,
+    ) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO slices (strategy, slice_id, rebalance_id, symbol, seq, side,"
             " qty, reduce_only, placed_ts, repegs, outcome, fill_qty, avg_price, taker)"
@@ -740,8 +1040,9 @@ class SliceRepo(_Repo):
             (self.s, slice_id),
         )
 
-    def finish(self, slice_id: str, outcome: str, fill_qty: float, avg_price: float, taker: bool,
-               ended_ts: int) -> None:
+    def finish(
+        self, slice_id: str, outcome: str, fill_qty: float, avg_price: float, taker: bool, ended_ts: int
+    ) -> None:
         self.db.execute(
             "UPDATE slices SET outcome = ?, fill_qty = ?, avg_price = ?, taker = ?, ended_ts = ?"
             " WHERE strategy = ? AND slice_id = ?",
@@ -756,8 +1057,9 @@ class SliceRepo(_Repo):
 
 
 class GovernorRepo(_Repo):
-    def record(self, ts_ms: int, dd: float, g_before: float, g_after: float, trigger: str,
-               applied: bool = False) -> None:
+    def record(
+        self, ts_ms: int, dd: float, g_before: float, g_after: float, trigger: str, applied: bool = False
+    ) -> None:
         self.db.execute(
             "INSERT INTO governor_state (strategy, ts, dd, g_before, g_after, trigger, applied)"
             " VALUES (?,?,?,?,?,?,?)",
@@ -786,8 +1088,7 @@ class GovernorRepo(_Repo):
     def last_before(self, ts_ms: int) -> dict[str, Any] | None:
         """The state in force at ``ts_ms`` — the time-in-state walk starts here."""
         return self.db.query_one(
-            "SELECT * FROM governor_state WHERE strategy = ? AND ts <= ? ORDER BY ts DESC, id DESC"
-            " LIMIT 1",
+            "SELECT * FROM governor_state WHERE strategy = ? AND ts <= ? ORDER BY ts DESC, id DESC LIMIT 1",
             (self.s, ts_ms),
         )
 
@@ -798,10 +1099,23 @@ class SymbolPnlRepo(_Repo):
             "INSERT OR REPLACE INTO symbol_pnl_daily (strategy, day, symbol, side, avg_notional,"
             " price_pnl, funding, fees, slippage, net_pnl, traded_notional, signal)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            [(self.s, _day(day), r["symbol"], r.get("side", "flat"), r.get("avg_notional", 0.0),
-              r.get("price_pnl", 0.0), r.get("funding", 0.0), r.get("fees", 0.0),
-              r.get("slippage", 0.0), r.get("net_pnl", 0.0), r.get("traded_notional", 0.0),
-              r.get("signal", 0.0)) for r in rows],
+            [
+                (
+                    self.s,
+                    _day(day),
+                    r["symbol"],
+                    r.get("side", "flat"),
+                    r.get("avg_notional", 0.0),
+                    r.get("price_pnl", 0.0),
+                    r.get("funding", 0.0),
+                    r.get("fees", 0.0),
+                    r.get("slippage", 0.0),
+                    r.get("net_pnl", 0.0),
+                    r.get("traded_notional", 0.0),
+                    r.get("signal", 0.0),
+                )
+                for r in rows
+            ],
         )
 
     def between(self, start: date | str, end: date | str) -> list[dict[str, Any]]:
@@ -858,10 +1172,20 @@ class TradeRepo(_Repo):
             "INSERT OR REPLACE INTO trades (strategy, trade_key, symbol, side, open_ts, close_ts,"
             " days, pnl, mae, max_notional, entry_signal, exit_signal)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (self.s, trade["trade_key"], trade["symbol"], trade["side"], trade["open_ts"],
-             trade.get("close_ts"), trade.get("days", 0.0), trade.get("pnl", 0.0),
-             trade.get("mae", 0.0), trade.get("max_notional", 0.0), trade.get("entry_signal", 0.0),
-             trade.get("exit_signal", 0.0)),
+            (
+                self.s,
+                trade["trade_key"],
+                trade["symbol"],
+                trade["side"],
+                trade["open_ts"],
+                trade.get("close_ts"),
+                trade.get("days", 0.0),
+                trade.get("pnl", 0.0),
+                trade.get("mae", 0.0),
+                trade.get("max_notional", 0.0),
+                trade.get("entry_signal", 0.0),
+                trade.get("exit_signal", 0.0),
+            ),
         )
 
     def open_trade(self, symbol: str) -> dict[str, Any] | None:
@@ -913,8 +1237,7 @@ class IlliquidRepo(_Repo):
 
     def record_failure(self, symbol: str, day: date | str, reason: str) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO rebalance_failures (strategy, symbol, day, reason)"
-            " VALUES (?,?,?,?)",
+            "INSERT OR REPLACE INTO rebalance_failures (strategy, symbol, day, reason) VALUES (?,?,?,?)",
             (self.s, symbol, _day(day), reason),
         )
 
@@ -946,8 +1269,10 @@ class MetricRepo(_Repo):
         self.db.executemany(
             "INSERT OR REPLACE INTO metrics (strategy, name, period, as_of_ts, value, n_obs,"
             " std_error, extra_json) VALUES (?,?,?,?,?,?,?,?)",
-            [(self.s, m.name, m.period, m.as_of_ts_ms, m.value, m.n_obs, m.std_error,
-              json_dumps(m.extra)) for m in values],
+            [
+                (self.s, m.name, m.period, m.as_of_ts_ms, m.value, m.n_obs, m.std_error, json_dumps(m.extra))
+                for m in values
+            ],
         )
 
     def latest(self, period: str | None = None) -> dict[str, dict[str, Any]]:
@@ -974,17 +1299,13 @@ class MetricRepo(_Repo):
 class AlertRepo(_Repo):
     def add(self, alert: Alert) -> int:
         cur = self.db.execute(
-            "INSERT INTO alerts (strategy, ts, severity, code, message, context_json)"
-            " VALUES (?,?,?,?,?,?)",
-            (self.s, alert.ts_ms, str(alert.severity), alert.code, alert.message,
-             json_dumps(alert.context)),
+            "INSERT INTO alerts (strategy, ts, severity, code, message, context_json) VALUES (?,?,?,?,?,?)",
+            (self.s, alert.ts_ms, str(alert.severity), alert.code, alert.message, json_dumps(alert.context)),
         )
         return int(cur.lastrowid or 0)
 
     def mark_delivered(self, alert_id: int) -> None:
-        self.db.execute(
-            "UPDATE alerts SET delivered = 1 WHERE strategy = ? AND id = ?", (self.s, alert_id)
-        )
+        self.db.execute("UPDATE alerts SET delivered = 1 WHERE strategy = ? AND id = ?", (self.s, alert_id))
 
     def undelivered(self) -> list[dict[str, Any]]:
         return self.db.query(
@@ -1005,6 +1326,19 @@ class AlertRepo(_Repo):
         return self.db.query_one(
             "SELECT * FROM alerts WHERE strategy = ? AND code = ? ORDER BY ts DESC LIMIT 1",
             (self.s, code),
+        )
+
+    def count_codes_since(self, codes: Sequence[str], since_ms: int) -> int:
+        """Occurrences of any of ``codes`` at or after ``since_ms`` (phase-gate evidence)."""
+        if not codes:
+            return 0
+        placeholders = ",".join("?" * len(codes))
+        return int(
+            self.db.scalar(
+                f"SELECT COUNT(*) FROM alerts WHERE strategy = ? AND ts >= ? AND code IN ({placeholders})",
+                (self.s, since_ms, *codes),
+            )
+            or 0
         )
 
     def ack(self, alert_id: int, ts_ms: int) -> None:
@@ -1047,15 +1381,37 @@ class ReportRepo(_Repo):
 
 
 class StateRepo(_Repo):
-    def save(self, *, state: str, phase: str, paused: bool, stopped: bool, safe_mode: bool,
-             halt_reason: str, governor_g: float, blocks: Sequence[str], context: dict[str, Any],
-             now_ms: int) -> None:
+    def save(
+        self,
+        *,
+        state: str,
+        phase: str,
+        paused: bool,
+        stopped: bool,
+        safe_mode: bool,
+        halt_reason: str,
+        governor_g: float,
+        blocks: Sequence[str],
+        context: dict[str, Any],
+        now_ms: int,
+    ) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO engine_state (strategy, state, phase, paused, stopped,"
             " safe_mode, halt_reason, governor_g, blocks_json, context_json, updated_ts)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (self.s, state, phase, int(paused), int(stopped), int(safe_mode), halt_reason,
-             governor_g, json_dumps(list(blocks)), json_dumps(context), now_ms),
+            (
+                self.s,
+                state,
+                phase,
+                int(paused),
+                int(stopped),
+                int(safe_mode),
+                halt_reason,
+                governor_g,
+                json_dumps(list(blocks)),
+                json_dumps(context),
+                now_ms,
+            ),
         )
 
     def load(self) -> dict[str, Any] | None:
@@ -1065,8 +1421,9 @@ class StateRepo(_Repo):
             row["context"] = json_loads(row["context_json"], {})
         return row
 
-    def log_control(self, action: str, operator: str, reason: str, payload: dict[str, Any],
-                    now_ms: int) -> None:
+    def log_control(
+        self, action: str, operator: str, reason: str, payload: dict[str, Any], now_ms: int
+    ) -> None:
         self.db.execute(
             "INSERT INTO control_log (strategy, ts, action, operator, reason, payload_json)"
             " VALUES (?,?,?,?,?,?)",
@@ -1075,13 +1432,21 @@ class StateRepo(_Repo):
 
     def controls(self, limit: int = 100) -> list[dict[str, Any]]:
         return self.db.query(
-            "SELECT * FROM control_log WHERE strategy = ? ORDER BY ts DESC LIMIT ?", (self.s, limit)
+            "SELECT * FROM control_log WHERE strategy = ? ORDER BY ts DESC, id DESC LIMIT ?", (self.s, limit)
         )
 
 
 class ApprovalRepo(_Repo):
-    def add(self, phase: str, granted: bool, operator: str, reason: str, evidence: dict[str, Any],
-            capital: float, now_ms: int) -> None:
+    def add(
+        self,
+        phase: str,
+        granted: bool,
+        operator: str,
+        reason: str,
+        evidence: dict[str, Any],
+        capital: float,
+        now_ms: int,
+    ) -> None:
         self.db.execute(
             "INSERT INTO approvals (strategy, phase, ts, granted, operator, reason, evidence_json,"
             " capital_usdt) VALUES (?,?,?,?,?,?,?,?)",
@@ -1090,16 +1455,26 @@ class ApprovalRepo(_Repo):
 
     def latest(self, phase: str) -> dict[str, Any] | None:
         row = self.db.query_one(
-            "SELECT * FROM approvals WHERE strategy = ? AND phase = ? ORDER BY ts DESC LIMIT 1",
+            "SELECT * FROM approvals WHERE strategy = ? AND phase = ? ORDER BY ts DESC, id DESC LIMIT 1",
             (self.s, phase),
         )
         if row:
             row["evidence"] = json_loads(row["evidence_json"], {})
         return row
 
+    def for_phase(self, phase: str) -> list[dict[str, Any]]:
+        """Every approval row for one phase, newest first, with ``evidence`` parsed."""
+        rows = self.db.query(
+            "SELECT * FROM approvals WHERE strategy = ? AND phase = ? ORDER BY ts DESC, id DESC",
+            (self.s, phase),
+        )
+        for r in rows:
+            r["evidence"] = json_loads(r["evidence_json"], {})
+        return rows
+
     def all(self) -> list[dict[str, Any]]:
         return self.db.query(
-            "SELECT * FROM approvals WHERE strategy = ? ORDER BY ts DESC", (self.s,)
+            "SELECT * FROM approvals WHERE strategy = ? ORDER BY ts DESC, id DESC", (self.s,)
         )
 
 
@@ -1119,6 +1494,16 @@ class HeartbeatRepo(_Repo):
             return 0.0
         return 100.0 * sum(1 for r in rows if r["ok"]) / len(rows)
 
+    def count(self, start_ms: int, end_ms: int) -> int:
+        """Beats recorded in the window. Zero means "no evidence", not "0 % uptime"."""
+        return int(
+            self.db.scalar(
+                "SELECT COUNT(*) FROM heartbeats WHERE strategy = ? AND ts >= ? AND ts < ?",
+                (self.s, start_ms, end_ms),
+            )
+            or 0
+        )
+
     def prune(self, before_ms: int) -> None:
         self.db.execute("DELETE FROM heartbeats WHERE strategy = ? AND ts < ?", (self.s, before_ms))
 
@@ -1126,8 +1511,7 @@ class HeartbeatRepo(_Repo):
 class ReconciliationRepo(_Repo):
     def add(self, ts_ms: int, kind: str, ok: bool, detail: str, breaks: Sequence[dict[str, Any]]) -> int:
         cur = self.db.execute(
-            "INSERT INTO reconciliations (strategy, ts, kind, ok, detail, breaks_json)"
-            " VALUES (?,?,?,?,?,?)",
+            "INSERT INTO reconciliations (strategy, ts, kind, ok, detail, breaks_json) VALUES (?,?,?,?,?,?)",
             (self.s, ts_ms, kind, int(ok), detail, json_dumps(list(breaks))),
         )
         return int(cur.lastrowid or 0)
@@ -1140,9 +1524,18 @@ class ReconciliationRepo(_Repo):
 
     def open_breaks(self) -> list[dict[str, Any]]:
         return self.db.query(
-            "SELECT * FROM reconciliations WHERE strategy = ? AND ok = 0 AND resolved_ts IS NULL"
-            " ORDER BY ts",
+            "SELECT * FROM reconciliations WHERE strategy = ? AND ok = 0 AND resolved_ts IS NULL ORDER BY ts",
             (self.s,),
+        )
+
+    def count_breaks(self, since_ms: int = 0) -> int:
+        """Reconciliation failures since ``since_ms`` — the P1 gate wants exactly zero."""
+        return int(
+            self.db.scalar(
+                "SELECT COUNT(*) FROM reconciliations WHERE strategy = ? AND ok = 0 AND ts >= ?",
+                (self.s, since_ms),
+            )
+            or 0
         )
 
     def latest(self) -> dict[str, Any] | None:
@@ -1159,8 +1552,9 @@ class FundingRepo(_Repo):
             [(self.s, r.symbol, r.funding_time_ms, r.rate, r.interval_hours) for r in rates],
         )
 
-    def history(self, symbol: str, start_ms: int | None = None,
-                end_ms: int | None = None) -> list[FundingRate]:
+    def history(
+        self, symbol: str, start_ms: int | None = None, end_ms: int | None = None
+    ) -> list[FundingRate]:
         sql = "SELECT * FROM funding_rates WHERE strategy = ? AND symbol = ?"
         params: list[Any] = [self.s, symbol]
         if start_ms is not None:
@@ -1171,8 +1565,12 @@ class FundingRepo(_Repo):
             params.append(end_ms)
         sql += " ORDER BY funding_time"
         return [
-            FundingRate(symbol=r["symbol"], funding_time_ms=r["funding_time"], rate=r["rate"],
-                        interval_hours=r["interval_hours"])
+            FundingRate(
+                symbol=r["symbol"],
+                funding_time_ms=r["funding_time"],
+                rate=r["rate"],
+                interval_hours=r["interval_hours"],
+            )
             for r in self.db.query(sql, params)
         ]
 
@@ -1186,8 +1584,18 @@ class FundingRepo(_Repo):
 
 class TrackingRepo(_Repo):
     def upsert(self, day: date | str, **fields: Any) -> None:
-        cols = ["live_pnl", "ref_pnl", "cum_live", "cum_ref", "corr_30d", "cum_diff_frac",
-                "cost_ratio", "turnover_ratio", "in_bounds", "breach_days"]
+        cols = [
+            "live_pnl",
+            "ref_pnl",
+            "cum_live",
+            "cum_ref",
+            "corr_30d",
+            "cum_diff_frac",
+            "cost_ratio",
+            "turnover_ratio",
+            "in_bounds",
+            "breach_days",
+        ]
         values = [fields.get(c) for c in cols]
         values[cols.index("in_bounds")] = int(fields.get("in_bounds", True))
         values[cols.index("breach_days")] = int(fields.get("breach_days", 0))
@@ -1218,16 +1626,39 @@ class BacktestRepo:
         self.db = db
         self.strategy = strategy
 
-    def save_run(self, run_id: str, *, created_ts: int, start_day: str, end_day: str,
-                 variant: str, params: dict[str, Any], manifest: dict[str, Any], git_commit: str,
-                 metrics: dict[str, Any], equity: Sequence[Any], duration_s: float) -> None:
+    def save_run(
+        self,
+        run_id: str,
+        *,
+        created_ts: int,
+        start_day: str,
+        end_day: str,
+        variant: str,
+        params: dict[str, Any],
+        manifest: dict[str, Any],
+        git_commit: str,
+        metrics: dict[str, Any],
+        equity: Sequence[Any],
+        duration_s: float,
+    ) -> None:
         self.db.execute(
             "INSERT OR REPLACE INTO backtest_runs (run_id, strategy, created_ts, start_day, end_day,"
             " variant, params_json, manifest_json, git_commit, metrics_json, equity_json, duration_s)"
             " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-            (run_id, str(self.strategy), created_ts, start_day, end_day, variant,
-             json_dumps(params), json_dumps(manifest), git_commit, json_dumps(metrics),
-             json_dumps(list(equity)), duration_s),
+            (
+                run_id,
+                str(self.strategy),
+                created_ts,
+                start_day,
+                end_day,
+                variant,
+                json_dumps(params),
+                json_dumps(manifest),
+                git_commit,
+                json_dumps(metrics),
+                json_dumps(list(equity)),
+                duration_s,
+            ),
         )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
@@ -1235,8 +1666,7 @@ class BacktestRepo:
 
     def latest_run(self, variant: str = "default") -> dict[str, Any] | None:
         return self.db.query_one(
-            "SELECT * FROM backtest_runs WHERE strategy = ? AND variant = ?"
-            " ORDER BY created_ts DESC LIMIT 1",
+            "SELECT * FROM backtest_runs WHERE strategy = ? AND variant = ? ORDER BY created_ts DESC LIMIT 1",
             (str(self.strategy), variant),
         )
 
@@ -1251,28 +1681,44 @@ class BacktestRepo:
         self.db.executemany(
             "INSERT OR REPLACE INTO robustness_reports (run_id, variant, net_pnl, sharpe, max_dd,"
             " sign_ok, detail_json) VALUES (?,?,?,?,?,?,?)",
-            [(run_id, r["variant"], r["net_pnl"], r["sharpe"], r["max_dd"], int(r["sign_ok"]),
-              json_dumps(r.get("detail", {}))) for r in rows],
+            [
+                (
+                    run_id,
+                    r["variant"],
+                    r["net_pnl"],
+                    r["sharpe"],
+                    r["max_dd"],
+                    int(r["sign_ok"]),
+                    json_dumps(r.get("detail", {})),
+                )
+                for r in rows
+            ],
         )
 
     def robustness(self, run_id: str) -> list[dict[str, Any]]:
-        return self.db.query(
-            "SELECT * FROM robustness_reports WHERE run_id = ? ORDER BY variant", (run_id,)
-        )
+        return self.db.query("SELECT * FROM robustness_reports WHERE run_id = ? ORDER BY variant", (run_id,))
 
     def save_walkforward(self, run_id: str, rows: Iterable[dict[str, Any]]) -> None:
         self.db.executemany(
             "INSERT OR REPLACE INTO walkforward (run_id, window, param_set, test_sharpe, rank,"
             " n_params, default_in_top_half, is_default) VALUES (?,?,?,?,?,?,?,?)",
-            [(run_id, r["window"], r["param_set"], r["test_sharpe"], r["rank"],
-              r.get("n_params", 0), int(r.get("default_in_top_half", False)),
-              int(r.get("is_default", False))) for r in rows],
+            [
+                (
+                    run_id,
+                    r["window"],
+                    r["param_set"],
+                    r["test_sharpe"],
+                    r["rank"],
+                    r.get("n_params", 0),
+                    int(r.get("default_in_top_half", False)),
+                    int(r.get("is_default", False)),
+                )
+                for r in rows
+            ],
         )
 
     def walkforward(self, run_id: str) -> list[dict[str, Any]]:
-        return self.db.query(
-            "SELECT * FROM walkforward WHERE run_id = ? ORDER BY window, rank", (run_id,)
-        )
+        return self.db.query("SELECT * FROM walkforward WHERE run_id = ? ORDER BY window, rank", (run_id,))
 
     def save_bootstrap(self, run_id: str, horizon: str, percentiles: dict[float, float]) -> None:
         self.db.executemany(
@@ -1298,10 +1744,36 @@ class Repositories:
     """Every repository, bound to one database and one strategy."""
 
     __slots__ = (
-        "alerts", "approvals", "backtest", "bars", "db", "equity", "fills", "funding", "governor",
-        "heartbeats", "illiquid", "ledger", "metrics", "orders", "positions", "rebalances",
-        "reconciliations", "reports", "risk_model", "signals", "slices", "snapshots", "state",
-        "strategy", "symbol_meta", "symbol_pnl", "targets", "tracking", "trades", "universe",
+        "alerts",
+        "approvals",
+        "backtest",
+        "bars",
+        "db",
+        "equity",
+        "fills",
+        "funding",
+        "governor",
+        "heartbeats",
+        "illiquid",
+        "ledger",
+        "metrics",
+        "orders",
+        "positions",
+        "rebalances",
+        "reconciliations",
+        "reports",
+        "risk_model",
+        "signals",
+        "slices",
+        "snapshots",
+        "state",
+        "strategy",
+        "symbol_meta",
+        "symbol_pnl",
+        "targets",
+        "tracking",
+        "trades",
+        "universe",
     )
 
     def __init__(self, db: Database, strategy: Strategy) -> None:
@@ -1341,9 +1813,33 @@ class Repositories:
 
 
 __all__ = [
-    "AlertRepo", "ApprovalRepo", "BacktestRepo", "BarRepo", "EquityCurveRepo", "FillRepo",
-    "FundingRepo", "GovernorRepo", "HeartbeatRepo", "IlliquidRepo", "LedgerRepo", "MetricRepo",
-    "OrderRepo", "PositionRepo", "RebalanceRepo", "ReconciliationRepo", "ReportRepo",
-    "Repositories", "RiskModelRepo", "SignalRepo", "SliceRepo", "SnapshotRepo", "StateRepo",
-    "SymbolMetaRepo", "SymbolPnlRepo", "TargetRepo", "TrackingRepo", "TradeRepo", "UniverseRepo",
+    "AlertRepo",
+    "ApprovalRepo",
+    "BacktestRepo",
+    "BarRepo",
+    "EquityCurveRepo",
+    "FillRepo",
+    "FundingRepo",
+    "GovernorRepo",
+    "HeartbeatRepo",
+    "IlliquidRepo",
+    "LedgerRepo",
+    "MetricRepo",
+    "OrderRepo",
+    "PositionRepo",
+    "RebalanceRepo",
+    "ReconciliationRepo",
+    "ReportRepo",
+    "Repositories",
+    "RiskModelRepo",
+    "SignalRepo",
+    "SliceRepo",
+    "SnapshotRepo",
+    "StateRepo",
+    "SymbolMetaRepo",
+    "SymbolPnlRepo",
+    "TargetRepo",
+    "TrackingRepo",
+    "TradeRepo",
+    "UniverseRepo",
 ]
