@@ -352,14 +352,14 @@ class MetricsEngine:
         # trailing window is the headline, the whole period rides along in extra,
         # exactly as for corr_btc — otherwise the two halves of one dashboard row
         # would be measured over different spans.
-        window_days_n = cfg.metrics.beta_window_days
+        carry_window = cfg.metrics.beta_window_days
         out.append(
             mv(
                 "corr_carry",
-                m.correlation(*_tail(carry_strategy, carry_bench, window_days_n)),
+                m.correlation(*_tail(carry_strategy, carry_bench, carry_window)),
                 n_obs=len(carry_days),
                 extra={
-                    "window": window_days_n,
+                    "window": carry_window,
                     "full_period": m.correlation(carry_strategy, carry_bench),
                 },
             )

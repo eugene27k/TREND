@@ -3,10 +3,12 @@
 Four services, in the order the engine runs them each day:
 
 ``LedgerService``   pulls the venue's income feed into ``ledger`` (cash truth).
+``Reconciler``      compares local state against the venue and blocks the engine
+                    when they disagree. It runs *before* the snapshot: the
+                    snapshot rewrites the local position table from the venue,
+                    and a table copied from the venue always agrees with it.
 ``SnapshotService`` records account + positions and maintains the time-weighted
                     equity curve the governor reads.
-``Reconciler``      compares local state against the venue and blocks the engine
-                    when they disagree.
 ``Attribution``     splits the day's P&L per symbol and per side, and proves the
                     split adds up (US-T14 AC 3).
 

@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import statistics
 from datetime import date, timedelta
+from itertools import pairwise
 
 import numpy as np
 import pytest
@@ -28,6 +29,7 @@ from aegis.core.types import (
     Side,
     SignalResult,
     Strategy,
+    SymbolInfo,
 )
 from aegis.gateway.fake import FakeGateway
 from aegis.ops.alerts import AlertBus
@@ -540,7 +542,7 @@ def test_us_t15_ac3_information_ratio_is_measured_against_the_backtest_reference
     days = _days(40)
     returns = _seed_equity(repos, days, _wave(40))
     equity = {date.fromisoformat(r["day"]): float(r["equity"]) for r in repos.equity.all()}
-    for prev, day in zip(days[:-1], days[1:], strict=True):
+    for prev, day in pairwise(days):
         repos.tracking.upsert(day, ref_pnl=0.5 * returns[day] * equity[prev])
 
     window = days[-30:]
@@ -940,7 +942,7 @@ def test_us_t15_ac2_corr_carry_uses_the_same_window_as_corr_btc(engine_env) -> N
     assert corr.extra["full_period"] < 0.9
 
 
-def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env, config) -> None:
+def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env) -> None:
     """A window that opens before the first equity row must not bill, credit or
     annualise over days on which there was no sleeve.
 
@@ -948,8 +950,9 @@ def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env, con
     only 40 of them are the sleeve's, so ytd must agree with since-inception on
     every rate-like number.
     """
-    ctx, repos = engine_env
-    ctx.cfg.infra.monthly_cost_eur = 6.0
+    base, repos = engine_env
+    cfg = base.cfg.model_copy(update={"infra": base.cfg.infra.model_copy(update={"monthly_cost_eur": 6.0})})
+    ctx = _context(cfg, repos, FakeClock(NOW_MS))
     days = _days(40)
     _seed_all(repos, 40)
 
@@ -961,7 +964,7 @@ def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env, con
     assert ytd["sharpe"].extra["live_days"] == 40
 
     cash = ytd["cash_alternative"]
-    assert cash.value == pytest.approx(m.cash_alternative(cash.extra["equity0"], config.bench.rf_annual, 40))
+    assert cash.value == pytest.approx(m.cash_alternative(cash.extra["equity0"], cfg.bench.rf_annual, 40))
     assert cash.value == pytest.approx(since["cash_alternative"].value)
 
     infra = ytd["net_of_infra"]
@@ -994,6 +997,54 @@ def test_us_t15_ac2_the_carry_sleeve_never_correlates_against_itself(config) -> 
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
     assert values["corr_carry"].value is None
     db.close()
+
+
+def test_us_t15_ac2_model_cost_reads_the_symbol_fee_when_one_is_stored(engine_env, config) -> None:
+    """Locked Decision 4: the fee model comes from ``commissionRate``, stored in
+    ``symbol_meta``; only a symbol without metadata falls back to the config."""
+    ctx, repos = engine_env
+    days = _days(3)
+    _seed_equity(repos, days, [0.0, 0.0])
+    repos.symbol_meta.upsert_many(
+        [
+            SymbolInfo(
+                symbol="BTCUSDT",
+                base_asset="BTC",
+                quote_asset="USDT",
+                status="TRADING",
+                contract_type="PERPETUAL",
+                tick_size=0.1,
+                step_size=0.001,
+                min_qty=0.001,
+                min_notional=5.0,
+                price_precision=1,
+                quantity_precision=3,
+                taker_fee=0.0009,
+            )
+        ],
+        to_ms(days[0]),
+    )
+    repos.fills.add_many(
+        [
+            Fill(
+                trade_id="f-btc",
+                order_id="o-btc",
+                symbol="BTCUSDT",
+                side=Side.BUY,
+                qty=100.0,
+                price=100.0,
+                fee=1.0,
+                fee_asset="USDT",
+                is_maker=True,
+                ts_ms=to_ms(days[-1]) + 1_000,
+                slippage_bps=1.0,
+            )
+        ]
+    )
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    expected = 0.0009 * 10_000.0 + config.exec.slippage_for("BTCUSDT")
+    assert values["execution_alpha"].extra["model_bps"] == pytest.approx(expected)
 
 
 def test_us_t15_ac2_model_cost_falls_back_to_the_defaults_without_fills(engine_env, config) -> None:

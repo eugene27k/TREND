@@ -25,11 +25,12 @@ a stale cache and it will not resolve itself, so it is reported as its own break
 kind and raised as ``CRITICAL`` immediately rather than waiting out the
 escalation window.
 
-Tolerances are deliberately asymmetric. A position matches if it is within one
-lot step (the smallest quantity the venue can express); a balance matches within
-0.01 USDT *plus* the unrealised P&L, because the ledger is cash and the venue's
-margin balance marks open positions to market — a difference of exactly the
-unrealised P&L is agreement, not a break.
+Tolerances are deliberately tight. A position matches if it is within one lot
+step (the smallest quantity the venue can express); a balance matches within
+0.01 USDT. The ledger is cash and the venue's margin balance marks open
+positions to market, so the two are made comparable by *adding* the venue's own
+unrealised P&L to the ledger side — never by treating it as slack, which would
+hide a real cash break of up to twice its size.
 """
 
 from __future__ import annotations
@@ -87,7 +88,25 @@ class Reconciler:
     # ------------------------------------------------------------------ #
 
     def positions(self, now_ms: int) -> ReconResult:
-        """Compare the local position table against the venue, symbol by symbol."""
+        """Compare the local position table against the venue, symbol by symbol.
+
+        Call this *before* the day's snapshot: ``SnapshotService.take`` rewrites
+        the local position table from the same venue read, and a table copied
+        from the venue always agrees with it. With no snapshot ever recorded
+        there is no local state to compare either — "every position appeared out
+        of nowhere" is the absence of history, not a liquidation — so the check
+        abstains exactly as :meth:`balance` does.
+        """
+        if self.ctx.repos.snapshots.first() is None:
+            result = ReconResult(
+                ok=True,
+                kind=KIND_POSITIONS,
+                breaks=(),
+                detail="no baseline snapshot — positions not evaluable",
+            )
+            self._record(now_ms, result)
+            return result
+
         local = self.ctx.repos.positions.all()
         venue = self.ctx.gateway.positions()
         traded = self._symbols_traded_since(now_ms - self.lookback_ms, now_ms)
@@ -137,9 +156,11 @@ class Reconciler:
         """Compare ledger-derived equity against the venue's margin balance.
 
         The ledger holds changes, not levels, so it is anchored on the oldest
-        stored snapshot's wallet balance and summed forward. Without an anchor
-        there is nothing to compare and the check abstains rather than inventing
-        a starting capital of zero.
+        stored snapshot's wallet balance and summed forward. That gives cash;
+        the venue's unrealised P&L is added to it to reach the same quantity the
+        venue calls the margin balance. Without an anchor there is nothing to
+        compare and the check abstains rather than inventing a starting capital
+        of zero.
         """
         anchor = self.ctx.repos.snapshots.first()
         if anchor is None:
@@ -151,11 +172,13 @@ class Reconciler:
 
         anchor_ts = int(anchor["ts"])
         sums = self.ctx.repos.ledger.sum_by_type(anchor_ts + 1, now_ms + 1)
-        expected = float(anchor["wallet_balance"]) + sum(sums.values())
+        cash = float(anchor["wallet_balance"]) + sum(sums.values())
 
         account = self.ctx.gateway.account()
+        # Cash + the venue's own mark-to-market is what the margin balance is.
+        expected = cash + account.unrealized_pnl
         diff = expected - account.margin_balance
-        tolerance = BALANCE_TOLERANCE_USDT + abs(account.unrealized_pnl)
+        tolerance = BALANCE_TOLERANCE_USDT
         ok = abs(diff) <= tolerance
 
         breaks: tuple[dict, ...] = ()
@@ -170,7 +193,10 @@ class Reconciler:
                     "tolerance": tolerance,
                 },
             )
-        detail = f"ledger {expected:.4f} vs venue {account.margin_balance:.4f} (tol {tolerance:.4f})"
+        detail = (
+            f"ledger {expected:.4f} (cash {cash:.4f} + unrealised {account.unrealized_pnl:.4f})"
+            f" vs venue {account.margin_balance:.4f} (tol {tolerance:.4f})"
+        )
         result = ReconResult(ok=ok, kind=KIND_BALANCE, breaks=breaks, detail=detail)
         self._record(now_ms, result)
         return result
@@ -276,12 +302,28 @@ class Reconciler:
         return {f.symbol for f in self.ctx.repos.fills.between(start_ms, now_ms + 1)}
 
     def _symbols_of_interest(self, start_ms: int, now_ms: int) -> set[str]:
-        """Symbols worth asking the venue about: held either side, or traded lately."""
+        """Symbols worth asking the venue about: held either side, traded lately,
+        or moved by the income feed.
+
+        The income feed matters on its own: a liquidation closes the position and
+        books our fills nowhere, so by the time the local table has been
+        refreshed the symbol is in neither book and its trade print would never
+        be pulled — leaving the realised P&L out of ``fills`` and the day's
+        identity broken.
+        """
         return (
             set(self.ctx.repos.positions.all())
             | set(self.ctx.gateway.positions())
             | self._symbols_traded_since(start_ms, now_ms)
+            | self._symbols_with_income(start_ms, now_ms)
         )
+
+    def _symbols_with_income(self, start_ms: int, now_ms: int) -> set[str]:
+        return {
+            str(row["symbol"])
+            for row in self.ctx.repos.ledger.between(start_ms, now_ms + 1)
+            if row["symbol"]
+        }
 
 
 __all__ = [

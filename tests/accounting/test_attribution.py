@@ -216,6 +216,23 @@ def test_us_t14_ac1_slippage_against_the_decision_mid_is_a_signed_cost(
     assert Attribution(ctx).identity_check(DAY)[0]
 
 
+def test_us_t14_ac3_a_day_with_no_opening_snapshot_is_not_evaluable(
+    ctx: Context, gateway: FakeGateway, clock: FakeClock
+) -> None:
+    """The engine's first day: the capital was on the venue before we ever looked.
+
+    With no snapshot before 00:00 there is no opening equity, and assuming zero
+    would report the whole account as an unexplained gain — a guaranteed false
+    ATTRIBUTION_IDENTITY_BREAK on day one.
+    """
+    _snapshot(ctx, clock, T0 + 12 * HOUR_MS)  # the first snapshot ever, equity 10 000
+    attribution = Attribution(ctx)
+    attribution.compute_day(DAY, T0 + 23 * HOUR_MS)
+
+    assert attribution.identity_check(DAY) == (True, 0.0)
+    assert ATTRIBUTION_IDENTITY_BREAK not in [a["code"] for a in ctx.repos.alerts.recent()]
+
+
 def test_us_t14_ac1_a_day_with_no_activity_produces_no_rows(ctx: Context, clock: FakeClock) -> None:
     _snapshot(ctx, clock, T0)
 

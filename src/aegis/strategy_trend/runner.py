@@ -293,9 +293,12 @@ class TrendRunner:
             return
         self.schedule.mark(sch.LEDGER_SYNC, now_ms)
         self.ledger.sync(now_ms)
+        # Reconcile *before* the snapshot: `take` rewrites the local position
+        # table from the venue, and a table copied from the venue can never
+        # disagree with it — a liquidation would become invisible (US-T11 AC 1).
+        self.reconciler.run_all(now_ms)
         self.snapshots.take(now_ms)
         self.snapshots.update_equity_curve(day_of(now_ms), now_ms)
-        self.reconciler.run_all(now_ms)
         self._update_governor(now_ms, report)
 
     def _update_governor(self, now_ms: int, report: TickReport) -> None:
@@ -440,7 +443,11 @@ class TrendRunner:
             plan = [p for p in plan if p.risk_reducing]
             report.note(f"plan_reduced_only:{before}->{len(plan)}")
 
-        rebalance_id = f"rb-{day.isoformat()}"
+        # Keyed by the TRADING day, not the bar day. The 00:05 rebalance of the
+        # 8th works the bar that closed at 00:00 on the 7th, and the operator —
+        # and Appendix D's "rebalance 2026-09-08" line, and the 01:05 summary
+        # that looks the row up by today's date — all mean the 8th.
+        rebalance_id = f"rb-{day_of(now_ms).isoformat()}"
         self.ctx.repos.targets.save(rebalance_id, targets)
         if not plan:
             report.note("rebalance_noop")

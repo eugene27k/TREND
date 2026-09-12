@@ -1,9 +1,0 @@
-{
- "ok": true,
- "now_ms": 1789214400000,
- "started_ms": 1789214400000,
- "uptime_s": 0.0,
- "strategies": [
-  "TREND"
- ]
-}

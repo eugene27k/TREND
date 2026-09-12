@@ -129,7 +129,9 @@ class Attribution:
         Reads what was persisted rather than recomputing, so the check also
         covers the write path. A non-zero residual raises
         ``ATTRIBUTION_IDENTITY_BREAK``: the operator must never learn from a
-        report that the books have not added up for a week.
+        report that the books have not added up for a week. A day with no
+        snapshot before it has no opening equity and is reported as ``(True,
+        0.0)`` — unmeasurable, not broken.
         """
         start_ms = day_start_ms(day)
         end_ms = start_ms + DAY_MS
@@ -144,7 +146,12 @@ class Attribution:
 
         opening = repos.snapshots.last_before(start_ms)
         closing = repos.snapshots.last_before(end_ms - 1)
-        start_equity = float(opening["margin_balance"]) if opening else 0.0
+        if opening is None:
+            # No snapshot before the day means no opening equity. Assuming zero
+            # would report the whole book as an unexplained gain on the engine's
+            # first day; "not evaluable" is not the same as "does not add up".
+            return True, 0.0
+        start_equity = float(opening["margin_balance"])
         end_equity = float(closing["margin_balance"]) if closing else start_equity
 
         residual = (attributed_net + non_position) - ((end_equity - start_equity) - transfers)

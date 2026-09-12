@@ -33,7 +33,11 @@ EQUITY = 10_000.0
 def build_world(
     clock: FakeClock, *, seed: int = 3, n_symbols: int = N_SYMBOLS, equity: float = EQUITY
 ) -> FakeGateway:
-    gw = FakeGateway(clock)
+    # The wallet is seeded through the constructor, NOT through set_account:
+    # set_account *pins* the fields it is given, which would freeze the venue's
+    # equity while the engine correctly books fees against it — and the balance
+    # reconciliation would then be right to complain, every day, forever.
+    gw = FakeGateway(clock, wallet_balance=equity)
     rng = random.Random(seed)
     for k in range(n_symbols):
         symbol = f"S{k:02d}USDT"
@@ -75,7 +79,6 @@ def build_world(
         gw.set_book(symbol, bid=price * 0.9995, ask=price * 1.0005)
         gw.set_mark(symbol, price)
         gw.set_predicted_funding(symbol, 0.0001, interval_hours=8.0)
-    gw.set_account(wallet_balance=equity, margin_balance=equity, available_balance=equity)
     gw.set_fill_policy("immediate")
     return gw
 
