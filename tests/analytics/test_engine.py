@@ -9,6 +9,7 @@ and stores, not about what data happens to exist.
 from __future__ import annotations
 
 import math
+import statistics
 from datetime import date, timedelta
 
 import numpy as np
@@ -184,21 +185,26 @@ def _seed_fills(
     repos.fills.add_many(fills)
 
 
+def _finish_rebalance(
+    repos: Repositories, rebalance_id: str, day: date, completion_pct: float, *, kind: str = "scheduled"
+) -> None:
+    repos.rebalances.create(rebalance_id, day, to_ms(day) + 300_000, kind=kind, equity=10_000.0)
+    repos.rebalances.finish(
+        rebalance_id,
+        ended_ts=to_ms(day) + 3_600_000,
+        status="complete",
+        completion_pct=completion_pct,
+        traded_notional=1_200.0,
+        fees=0.5,
+        avg_slippage_bps=1.5,
+        maker_ratio=0.7,
+        residuals=[],
+    )
+
+
 def _seed_rebalances(repos: Repositories, days: list[date]) -> None:
     for i, day in enumerate(days):
-        rid = f"rb-{day.isoformat()}"
-        repos.rebalances.create(rid, day, to_ms(day) + 300_000, equity=10_000.0)
-        repos.rebalances.finish(
-            rid,
-            ended_ts=to_ms(day) + 3_600_000,
-            status="complete",
-            completion_pct=100.0 - (i % 3) * 5.0,
-            traded_notional=1_200.0,
-            fees=0.5,
-            avg_slippage_bps=1.5,
-            maker_ratio=0.7,
-            residuals=[],
-        )
+        _finish_rebalance(repos, f"rb-{day.isoformat()}", day, 100.0 - (i % 3) * 5.0)
 
 
 def _seed_signals(repos: Repositories, days: list[date]) -> None:
@@ -525,11 +531,25 @@ def test_us_t15_ac3_cash_alternative_and_net_of_infra_use_the_configured_inputs(
 
 
 def test_us_t15_ac3_information_ratio_is_measured_against_the_backtest_reference(engine_env) -> None:
+    """``tracking.ref_pnl`` becomes a return by dividing by the previous day's equity.
+
+    The reference is seeded at exactly half the live P&L, so the active return is
+    half the strategy return and the ratio is computable with ``statistics``.
+    """
     ctx, repos = engine_env
-    _seed_all(repos)
+    days = _days(40)
+    returns = _seed_equity(repos, days, _wave(40))
+    equity = {date.fromisoformat(r["day"]): float(r["equity"]) for r in repos.equity.all()}
+    for prev, day in zip(days[:-1], days[1:], strict=True):
+        repos.tracking.upsert(day, ref_pnl=0.5 * returns[day] * equity[prev])
+
+    window = days[-30:]
+    active = [returns[d] * 0.5 for d in window]
+    expected = statistics.fmean(active) / statistics.stdev(active) * math.sqrt(365)
+
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
     assert values["information_ratio"].n_obs == 30
-    assert values["information_ratio"].value is not None
+    assert values["information_ratio"].value == pytest.approx(expected, rel=1e-9)
 
 
 def test_us_t15_ac3_information_ratio_is_none_without_a_reference_run(engine_env) -> None:
@@ -556,14 +576,36 @@ def test_us_t15_ac2_realised_vol_is_compared_against_the_configured_target(engin
 
 
 def test_us_t15_ac2_exposure_falls_back_to_attribution_when_no_snapshot_exists(engine_env) -> None:
+    """Three hand-written days on a flat 10 000 book, so every number is arithmetic.
+
+    gross x = 0.30 / 0.20 / 0.25, net x = +0.10 / +0.10 / -0.25.
+    """
     ctx, repos = engine_env
-    _seed_all(repos)
-    values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
-    gross = values["gross_exposure"]
-    assert gross.n_obs == 30
-    assert gross.value is not None and gross.value > 0
-    assert gross.extra["max"] >= gross.value
-    assert values["net_exposure"].value is not None
+    days = _days(3)
+    _seed_equity(repos, days, [0.0, 0.0], start_equity=10_000.0)
+    book = {
+        days[0]: (("BTCUSDT", "long", 2_000.0), ("ETHUSDT", "short", 1_000.0)),
+        days[1]: (("BTCUSDT", "long", 1_500.0), ("ETHUSDT", "short", 500.0)),
+        days[2]: (("BTCUSDT", "short", 2_500.0),),
+    }
+    for day, rows in book.items():
+        repos.symbol_pnl.upsert_many(
+            day,
+            [
+                {"symbol": s, "side": side, "avg_notional": n, "net_pnl": 0.0}
+                for s, side, n in rows
+            ],
+        )
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    gross, net = values["gross_exposure"], values["net_exposure"]
+    assert gross.n_obs == 3
+    assert gross.value == pytest.approx((0.30 + 0.20 + 0.25) / 3)
+    assert gross.extra["max"] == pytest.approx(0.30)
+    assert gross.extra["current"] == pytest.approx(0.25)
+    assert net.value == pytest.approx((0.10 + 0.10 - 0.25) / 3)
+    assert net.extra["max"] == pytest.approx(-0.25)  # most extreme reading, sign kept
+    assert net.extra["current"] == pytest.approx(-0.25)
 
 
 def test_us_t15_ac2_exposure_prefers_the_snapshot_series_when_present(engine_env) -> None:
@@ -586,68 +628,194 @@ def test_us_t15_ac2_exposure_prefers_the_snapshot_series_when_present(engine_env
     assert values["gross_exposure"].n_obs == 5
 
 
-def test_us_t15_ac2_execution_alpha_compares_realised_cost_with_the_model(engine_env) -> None:
+def test_us_t15_ac2_execution_alpha_compares_realised_cost_with_the_model(engine_env, config) -> None:
+    """Two 10 000 fills: 6.00 of fees and 4.00 of slippage -> 5 bps realised.
+
+    The conservative model is the taker fee plus each symbol's slippage bps
+    (Locked Decision 8), notional-weighted: BTC 2 bps and SOL 6 bps over equal
+    clips, so ``alpha = (model - 5) / 10 000 x 20 000``.
+    """
     ctx, repos = engine_env
-    _seed_all(repos)
-    values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
-    alpha = values["execution_alpha"]
-    cost = values["cost_per_unit_bps"]
-    assert cost.value == pytest.approx(
-        (cost.extra["fees"] + cost.extra["slippage"]) / cost.extra["traded_notional"] * 10_000.0
+    days = _days(3)
+    _seed_equity(repos, days, [0.0, 0.0], start_equity=10_000.0)
+    repos.fills.add_many(
+        [
+            Fill(
+                trade_id="f-btc",
+                order_id="o-btc",
+                symbol="BTCUSDT",
+                side=Side.BUY,
+                qty=100.0,
+                price=100.0,
+                fee=1.0,
+                fee_asset="USDT",
+                is_maker=True,
+                ts_ms=to_ms(days[-1]) + 1_000,
+                slippage_bps=1.0,
+            ),
+            Fill(
+                trade_id="f-sol",
+                order_id="o-sol",
+                symbol="SOLUSDT",
+                side=Side.SELL,
+                qty=100.0,
+                price=100.0,
+                fee=5.0,
+                fee_asset="USDT",
+                is_maker=False,
+                ts_ms=to_ms(days[-1]) + 2_000,
+                slippage_bps=3.0,
+            ),
+        ]
     )
-    assert alpha.extra["model_bps"] > 0
-    expected = (alpha.extra["model_bps"] - cost.value) / 10_000.0 * cost.extra["traded_notional"]
-    assert alpha.value == pytest.approx(expected)
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    cost, alpha = values["cost_per_unit_bps"], values["execution_alpha"]
+    assert cost.extra["fees"] == pytest.approx(6.0)
+    assert cost.extra["slippage"] == pytest.approx(4.0)
+    assert cost.extra["traded_notional"] == pytest.approx(20_000.0)
+    assert cost.value == pytest.approx(5.0)
+
+    taker_bps = config.exec.taker_fee_fallback * 10_000.0
+    model = taker_bps + (config.exec.slippage_for("BTCUSDT") + config.exec.slippage_for("SOLUSDT")) / 2
+    assert alpha.extra["model_bps"] == pytest.approx(model)
+    assert alpha.value == pytest.approx((model - 5.0) / 10_000.0 * 20_000.0)
+    assert values["maker_ratio"].value == pytest.approx(0.5)
 
 
 def test_us_t15_ac2_maker_ratio_reflects_the_fills(engine_env) -> None:
     ctx, repos = engine_env
     _seed_all(repos)
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
-    assert values["maker_ratio"].value == pytest.approx(2 / 3)
+    assert values["maker_ratio"].value == pytest.approx(2 / 3)  # one taker symbol in three
 
 
 def test_us_t15_ac2_rebalance_completion_averages_scheduled_rebalances(engine_env) -> None:
+    """100 / 90 / 80 scheduled -> 90.0; the risk cut beside them is not a rebalance."""
+    ctx, repos = engine_env
+    days = _days(3)
+    _seed_equity(repos, days, [0.0, 0.0])
+    for day, pct in zip(days, (100.0, 90.0, 80.0), strict=True):
+        _finish_rebalance(repos, f"rb-{day}", day, pct)
+    _finish_rebalance(repos, "cut", days[-1], 0.0, kind="risk_cut")
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    assert values["rebalance_completion"].n_obs == 3
+    assert values["rebalance_completion"].value == pytest.approx(90.0)
+
+
+def test_us_t15_ac2_rebalance_completion_of_the_seeded_month_is_exact(engine_env) -> None:
+    """The seed cycles 100 / 95 / 90, so 30 days average to exactly 95."""
     ctx, repos = engine_env
     _seed_all(repos)
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
     assert values["rebalance_completion"].n_obs == 30
-    assert 90.0 <= values["rebalance_completion"].value <= 100.0
+    assert values["rebalance_completion"].value == pytest.approx(95.0)
 
 
 def test_us_t15_ac2_side_attribution_and_concentration_reach_the_metric_table(engine_env) -> None:
+    """Four hand-written symbol-days: BTC +12 then -6 long, ETH -4 then +8 short."""
+    ctx, repos = engine_env
+    days = _days(2)
+    _seed_equity(repos, days, [0.0])
+    repos.symbol_pnl.upsert_many(
+        days[0],
+        [
+            {"symbol": "BTCUSDT", "side": "long", "avg_notional": 1_000.0, "net_pnl": 12.0},
+            {"symbol": "ETHUSDT", "side": "short", "avg_notional": 1_000.0, "net_pnl": -4.0},
+        ],
+    )
+    repos.symbol_pnl.upsert_many(
+        days[1],
+        [
+            {"symbol": "BTCUSDT", "side": "long", "avg_notional": 1_000.0, "net_pnl": -6.0},
+            {"symbol": "ETHUSDT", "side": "short", "avg_notional": 1_000.0, "net_pnl": 8.0},
+        ],
+    )
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    assert values["long_pnl"].value == pytest.approx(6.0) and values["long_pnl"].n_obs == 2
+    assert values["short_pnl"].value == pytest.approx(4.0) and values["short_pnl"].n_obs == 2
+    assert values["hit_rate_long"].value == pytest.approx(0.5)
+    assert values["hit_rate_short"].value == pytest.approx(0.5)
+    concentration = values["concentration"]
+    assert concentration.extra["shares"] == pytest.approx({"BTCUSDT": 0.6, "ETHUSDT": 0.4})
+    assert concentration.value == pytest.approx(0.6)
+
+
+def test_us_t15_ac2_governor_time_in_state_is_time_weighted(engine_env) -> None:
+    """The seeded cut to g = 0.5 lands 60 days before the end of a 90-day window."""
+    ctx, repos = engine_env
+    _seed_all(repos)
+    values = _by_name(MetricsEngine(ctx).compute_period("90d", NOW_MS), "90d")
+    assert values["governor_time_g1"].value == pytest.approx(30 / 90)
+    assert values["governor_time_g05"].value == pytest.approx(60 / 90)
+    assert values["governor_time_g025"].value == pytest.approx(0.0)
+    assert values["governor_time_g025"].extra["other"] == pytest.approx(0.0)
+
+
+def test_us_t15_ac2_governor_state_before_the_window_is_carried_in(engine_env) -> None:
+    """The cut happened 90 days before the 30-day window: all of it sits at 0.5."""
     ctx, repos = engine_env
     _seed_all(repos)
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
-    assert values["long_pnl"].n_obs > 0 and values["short_pnl"].n_obs > 0
-    assert 0.0 <= values["hit_rate_long"].value <= 1.0
-    assert set(values["concentration"].extra["shares"]) == set(SYMBOLS)
+    assert values["governor_time_g05"].value == pytest.approx(1.0)
+    assert values["governor_time_g1"].value == pytest.approx(0.0)
 
 
-def test_us_t15_ac2_governor_time_in_state_sums_to_one(engine_env) -> None:
+def test_us_t15_ac2_trade_statistics_are_the_closed_episodes_of_the_window(engine_env) -> None:
+    """Three trades: 4/8/12 days, +30/-10/+20, MAE 5/15/25 (US-T14 AC 4)."""
     ctx, repos = engine_env
-    _seed_all(repos)
-    values = _by_name(MetricsEngine(ctx).compute_period("90d", NOW_MS), "90d")
-    total = (
-        values["governor_time_g1"].value
-        + values["governor_time_g05"].value
-        + values["governor_time_g025"].value
-        + values["governor_time_g025"].extra["other"]
-    )
-    assert total == pytest.approx(1.0)
-    assert values["governor_time_g05"].value > 0  # the seeded cut to 0.5 is inside the window
+    days = _days(5)
+    _seed_equity(repos, days, [0.0] * 4)
+    for i, (held, pnl, mae) in enumerate(((4.0, 30.0, -5.0), (8.0, -10.0, -15.0), (12.0, 20.0, -25.0))):
+        repos.trades.upsert(
+            {
+                "trade_key": f"T{i}",
+                "symbol": SYMBOLS[i],
+                "side": "long",
+                "open_ts": to_ms(days[0]) - 20 * DAY_MS,
+                "close_ts": to_ms(days[-1]) + 3_600_000,
+                "days": held,
+                "pnl": pnl,
+                "mae": mae,
+                "max_notional": 1_000.0,
+            }
+        )
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    assert values["trade_count"].value == pytest.approx(3.0)
+    assert values["avg_holding_days"].value == pytest.approx(8.0)
+    assert values["win_rate"].value == pytest.approx(2 / 3)
+    assert values["avg_win"].value == pytest.approx(25.0)
+    assert values["avg_loss"].value == pytest.approx(-10.0)
+    assert values["trade_count"].extra["mae_median"] == pytest.approx(15.0)
+    assert values["trade_count"].extra["mae_max"] == pytest.approx(25.0)
 
 
-def test_us_t15_ac2_trade_and_signal_statistics_are_computed(engine_env) -> None:
+def test_us_t15_ac2_signal_statistics_are_computed_over_the_window(engine_env) -> None:
+    """Two days, two symbols: mean |s| 0.5, turnover 0.4, strong fraction 0.5."""
     ctx, repos = engine_env
-    _seed_all(repos)
-    values = _by_name(MetricsEngine(ctx).compute_period("90d", NOW_MS), "90d")
-    assert values["trade_count"].value > 0
-    assert values["avg_holding_days"].value > 0
-    assert 0.0 <= values["win_rate"].value <= 1.0
-    assert values["signal_mean_abs"].value > 0
-    assert values["signal_turnover"].value is not None
-    assert 0.0 <= values["signal_strong_frac"].value <= 1.0
+    days = _days(2)
+    _seed_equity(repos, days, [0.0])
+    for day, values_by_symbol in (
+        (days[0], {"BTCUSDT": 0.8, "ETHUSDT": -0.2}),
+        (days[1], {"BTCUSDT": 0.4, "ETHUSDT": -0.6}),
+    ):
+        repos.signals.save_many(
+            day,
+            [
+                SignalResult(symbol=s, x=(), y=(), z=(), u=(), signal=v, bar_day=day)
+                for s, v in values_by_symbol.items()
+            ],
+            to_ms(day),
+        )
+
+    values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
+    assert values["signal_mean_abs"].value == pytest.approx((0.8 + 0.2 + 0.4 + 0.6) / 4)
+    assert values["signal_turnover"].value == pytest.approx(0.4)
+    assert values["signal_strong_frac"].value == pytest.approx(0.5)
+    assert values["signal_mean_abs"].n_obs == 4
 
 
 def test_us_t15_ac2_regime_table_is_stored_with_its_buckets(engine_env) -> None:
@@ -660,18 +828,63 @@ def test_us_t15_ac2_regime_table_is_stored_with_its_buckets(engine_env) -> None:
 
 
 def test_us_t15_ac2_funding_share_uses_pre_cost_pnl(engine_env) -> None:
+    """Price 100 + funding 25 = gross 125, so funding is a fifth of it — fees excluded."""
     ctx, repos = engine_env
-    _seed_all(repos)
+    days = _days(2)
+    _seed_equity(repos, days, [0.0])
+    repos.symbol_pnl.upsert_many(
+        days[-1],
+        [
+            {"symbol": "BTCUSDT", "side": "long", "price_pnl": 60.0, "funding": 15.0,
+             "fees": 5.0, "slippage": 2.0, "net_pnl": 68.0},
+            {"symbol": "ETHUSDT", "side": "short", "price_pnl": 40.0, "funding": 10.0,
+             "fees": 3.0, "slippage": 1.0, "net_pnl": 46.0},
+        ],
+    )
+    share = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")["funding_share"]
+    assert share.extra["gross_pnl"] == pytest.approx(125.0)
+    assert share.value == pytest.approx(0.2)
+
+
+def _alternating(n: int, size: float) -> list[float]:
+    """+size, -size, ... — every 30-day window has the same stdev, by construction."""
+    return [size if i % 2 == 0 else -size for i in range(n)]
+
+
+def _daily_for_annual_vol(annual: float, window: int) -> float:
+    """The +/-c that makes a ``window``-long alternating series annualise to ``annual``."""
+    return annual / math.sqrt(365.0) / math.sqrt(window / (window - 1.0))
+
+
+def test_us_t15_ac2_vol_target_adherence_counts_every_day_on_target(engine_env, config) -> None:
+    """A book running exactly at the 20 % target is inside 0.5x-1.5x on every day."""
+    ctx, repos = engine_env
+    target = config.sizing.sigma_target_portfolio
+    days = _days(60)
+    c = _daily_for_annual_vol(target, config.metrics.vol_window_days)
+    _seed_equity(repos, days, _alternating(60, c))
+
     values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
-    share = values["funding_share"]
-    assert share.value == pytest.approx(share.extra["funding"] / share.extra["gross_pnl"])
+    assert values["realised_vol"].value == pytest.approx(target, rel=1e-6)
+    assert values["vol_ratio"].value == pytest.approx(1.0, rel=1e-6)
+    assert values["vol_target_adherence"].n_obs == 30
+    assert values["vol_target_adherence"].value == pytest.approx(1.0)
 
 
-def test_us_t15_ac2_vol_target_adherence_is_a_fraction(engine_env) -> None:
+def test_us_t15_ac2_vol_target_adherence_counts_no_day_when_the_book_runs_hot(
+    engine_env, config
+) -> None:
+    """Twice the target is outside the 1.5x band on every day — the fraction is 0."""
     ctx, repos = engine_env
-    _seed_all(repos)
-    values = _by_name(MetricsEngine(ctx).compute_period("90d", NOW_MS), "90d")
-    assert 0.0 <= values["vol_target_adherence"].value <= 1.0
+    target = config.sizing.sigma_target_portfolio
+    days = _days(60)
+    c = _daily_for_annual_vol(2.0 * target, config.metrics.vol_window_days)
+    _seed_equity(repos, days, _alternating(60, c))
+
+    values = _by_name(MetricsEngine(ctx).compute_period("30d", NOW_MS), "30d")
+    assert values["vol_ratio"].value == pytest.approx(2.0, rel=1e-6)
+    assert values["vol_target_adherence"].n_obs == 30
+    assert values["vol_target_adherence"].value == pytest.approx(0.0)
 
 
 # --------------------------------------------------------------------------- #
@@ -701,6 +914,68 @@ def test_us_t15_ac2_corr_carry_is_computed_from_a_combined_database(engine_env) 
     assert values["sharpe"].value == pytest.approx(
         m.sharpe([returns[d] for d in days[-30:]], ctx.cfg.bench.rf_annual)[0], rel=1e-12
     )
+
+
+def test_us_t15_ac2_corr_carry_uses_the_same_window_as_corr_btc(engine_env) -> None:
+    """Section 10: "Correlation with BTC / with CARRY ... same windows".
+
+    CARRY is seeded as TREND's mirror image for everything except the last 60
+    days, where it is a copy. The 60-day headline must therefore be +1 while the
+    full period, carried in ``extra``, must not be.
+    """
+    ctx, repos = engine_env
+    days = _days(120)
+    trend_returns = _wave(120)
+    _seed_equity(repos, days, trend_returns)
+    window = ctx.cfg.metrics.beta_window_days
+    # returns[j] is the return on days[j + 1]: the last `window` days are j >= 118 - window.
+    mirrored = [r if j >= len(days) - 2 - window else -r for j, r in enumerate(trend_returns)]
+    _seed_equity(Repositories(repos.db, Strategy.CARRY), days, mirrored)
+
+    corr = _by_name(MetricsEngine(ctx).compute_period("since_inception", NOW_MS), "since_inception")[
+        "corr_carry"
+    ]
+    assert corr.extra["window"] == window
+    assert corr.value == pytest.approx(1.0, abs=1e-9)
+    assert corr.extra["full_period"] < 0.9
+
+
+def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env, config) -> None:
+    """A window that opens before the first equity row must not bill, credit or
+    annualise over days on which there was no sleeve.
+
+    Seeded 40 days before ``NOW``, the year-to-date window is 273 days long but
+    only 40 of them are the sleeve's, so ytd must agree with since-inception on
+    every rate-like number.
+    """
+    ctx, repos = engine_env
+    ctx.cfg.infra.monthly_cost_eur = 6.0
+    days = _days(40)
+    _seed_all(repos, 40)
+
+    ytd = _by_name(MetricsEngine(ctx).compute_period("ytd", NOW_MS), "ytd")
+    since = _by_name(
+        MetricsEngine(ctx).compute_period("since_inception", NOW_MS), "since_inception"
+    )
+    assert ytd["sharpe"].extra["period_days"] == 273  # the window itself is untouched
+    assert ytd["sharpe"].extra["live_days"] == 40
+
+    cash = ytd["cash_alternative"]
+    assert cash.value == pytest.approx(m.cash_alternative(cash.extra["equity0"], config.bench.rf_annual, 40))
+    assert cash.value == pytest.approx(since["cash_alternative"].value)
+
+    infra = ytd["net_of_infra"]
+    assert infra.value == pytest.approx(m.net_of_infra(infra.extra["net_pnl"], 6.0, 40))
+    assert infra.value == pytest.approx(since["net_of_infra"].value)
+
+    assert ytd["turnover"].extra["annualised"] == pytest.approx(
+        ytd["turnover"].value * 365 / 40
+    )
+    # The governor was at g = 1 for the first half of the 40 days, not for the
+    # 233 days before the sleeve existed.
+    assert ytd["governor_time_g1"].value == pytest.approx(0.5)
+    assert ytd["governor_time_g1"].value == pytest.approx(since["governor_time_g1"].value)
+    assert days[0] == date.fromisoformat(repos.equity.all()[0]["day"])
 
 
 def test_us_t15_ac2_the_carry_sleeve_never_correlates_against_itself(config) -> None:

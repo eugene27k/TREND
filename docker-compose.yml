@@ -43,7 +43,14 @@ services:
     container_name: aegis-carry
     restart: always
     command: ["--strategy", "carry", "--mode", "${CARRY_MODE:-paper}"]
-    profiles: ["carry"]          # only started once the CARRY sleeve is deployed
+    # PLACEHOLDER. This repository builds the TREND sleeve; CARRY's strategy
+    # modules and its config/carry.yaml belong to its own PRD and are not here,
+    # so the engine refuses --strategy carry. The service is provisioned anyway —
+    # its own database, Healthchecks check and Litestream replica path — because
+    # US-T19 AC 1 is about the host running both sleeves side by side, and this
+    # is the file that has to be right when CARRY lands. It stays behind a
+    # profile so `docker compose up -d` never starts something that cannot run.
+    profiles: ["carry"]
     environment:
       AEGIS_STRATEGY: carry
       AEGIS_MODE: ${CARRY_MODE:-paper}

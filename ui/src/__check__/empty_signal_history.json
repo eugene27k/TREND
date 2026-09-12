@@ -1,0 +1,6 @@
+{
+ "strategy": "TREND",
+ "symbol": "BTCUSDT",
+ "days": 90,
+ "points": []
+}

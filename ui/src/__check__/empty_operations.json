@@ -1,0 +1,54 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "mode": "paper",
+ "state": {
+  "state": "IDLE",
+  "phase": "P0_BACKTEST",
+  "paused": false,
+  "stopped": false,
+  "safe_mode": false,
+  "halt_reason": "",
+  "governor_g": 1.0,
+  "blocks": [],
+  "context": {},
+  "updated_ts": null
+ },
+ "heartbeat": {
+  "enabled": false,
+  "interval_s": 300,
+  "last_ts": null,
+  "last_ok": null,
+  "beats_24h": 0,
+  "uptime_24h_pct": null,
+  "uptime_7d_pct": null,
+  "uptime_30d_pct": null
+ },
+ "reconciliation": {
+  "last_ts": null,
+  "last_kind": null,
+  "last_ok": null,
+  "last_detail": "",
+  "open_breaks": 0,
+  "breaks": []
+ },
+ "backup": {
+  "enabled": false,
+  "replica_path": "backups/trend",
+  "last_ok_ts": null,
+  "lag_s": null,
+  "restore_check_days": 7
+ },
+ "infra": {
+  "host": "oracle-free",
+  "monthly_cost_eur": 0.0,
+  "max_rss_mb": 1024,
+  "rss_mb": null,
+  "cpu_pct": null,
+  "net_of_infra": null
+ },
+ "alerts": [],
+ "unacked_critical": 0,
+ "control_log": [],
+ "reports": []
+}

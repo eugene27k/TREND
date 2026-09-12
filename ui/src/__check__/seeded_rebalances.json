@@ -1,0 +1,25 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "rows": [
+  {
+   "rebalance_id": "TREND-2026-09-12",
+   "day": "2026-09-12",
+   "kind": "scheduled",
+   "status": "complete",
+   "started_ts": 1789171500000,
+   "ended_ts": 1789172100000,
+   "duration_s": 600.0,
+   "completion_pct": 98.0,
+   "traded_notional": 740.0,
+   "planned_notional": 750.0,
+   "fees": 0.12,
+   "avg_slippage_bps": 1.6,
+   "maker_ratio": 1.0,
+   "equity": 10120.520516608012,
+   "governor_g": 1.0,
+   "n_residuals": 1
+  }
+ ],
+ "avg_completion_pct": 98.0
+}

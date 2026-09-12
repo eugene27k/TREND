@@ -1,0 +1,318 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "periods": [
+  {
+   "period": "7d",
+   "start_day": "2026-09-06",
+   "end_day": "2026-09-12",
+   "days": 7,
+   "total_net_pnl": 33.6,
+   "components": {
+    "price_pnl": 42.0,
+    "funding": -5.25,
+    "fees": -2.1,
+    "slippage": -1.05,
+    "net_pnl": 33.6,
+    "traded_notional": 2520.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 18.2,
+     "contribution_share": 0.5416666666666666
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 11.200000000000001,
+     "contribution_share": 0.33333333333333337
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 4.200000000000001,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 22.400000000000002,
+     "contribution_share": 0.6666666666666667
+    },
+    {
+     "side": "short",
+     "net_pnl": 11.200000000000001,
+     "contribution_share": 0.33333333333333337
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  },
+  {
+   "period": "30d",
+   "start_day": "2026-08-14",
+   "end_day": "2026-09-12",
+   "days": 30,
+   "total_net_pnl": 144.0,
+   "components": {
+    "price_pnl": 180.0,
+    "funding": -22.5,
+    "fees": -9.0,
+    "slippage": -4.5,
+    "net_pnl": 144.0,
+    "traded_notional": 10800.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 78.0,
+     "contribution_share": 0.5416666666666666
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 48.0,
+     "contribution_share": 0.3333333333333333
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 18.000000000000004,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 96.0,
+     "contribution_share": 0.6666666666666666
+    },
+    {
+     "side": "short",
+     "net_pnl": 48.0,
+     "contribution_share": 0.3333333333333333
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  },
+  {
+   "period": "90d",
+   "start_day": "2026-06-15",
+   "end_day": "2026-09-12",
+   "days": 90,
+   "total_net_pnl": 192.0,
+   "components": {
+    "price_pnl": 240.0,
+    "funding": -30.0,
+    "fees": -12.0,
+    "slippage": -6.0,
+    "net_pnl": 192.0,
+    "traded_notional": 14400.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 104.0,
+     "contribution_share": 0.5416666666666666
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 24.000000000000004,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 128.0,
+     "contribution_share": 0.6666666666666666
+    },
+    {
+     "side": "short",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  },
+  {
+   "period": "mtd",
+   "start_day": "2026-09-01",
+   "end_day": "2026-09-12",
+   "days": 12,
+   "total_net_pnl": 57.6,
+   "components": {
+    "price_pnl": 72.0,
+    "funding": -9.0,
+    "fees": -3.6,
+    "slippage": -1.8,
+    "net_pnl": 57.6,
+    "traded_notional": 4320.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 31.200000000000003,
+     "contribution_share": 0.5416666666666667
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 19.200000000000003,
+     "contribution_share": 0.33333333333333337
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 7.200000000000001,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 38.400000000000006,
+     "contribution_share": 0.6666666666666667
+    },
+    {
+     "side": "short",
+     "net_pnl": 19.200000000000003,
+     "contribution_share": 0.33333333333333337
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  },
+  {
+   "period": "ytd",
+   "start_day": "2026-01-01",
+   "end_day": "2026-09-12",
+   "days": 255,
+   "total_net_pnl": 192.0,
+   "components": {
+    "price_pnl": 240.0,
+    "funding": -30.0,
+    "fees": -12.0,
+    "slippage": -6.0,
+    "net_pnl": 192.0,
+    "traded_notional": 14400.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 104.0,
+     "contribution_share": 0.5416666666666666
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 24.000000000000004,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 128.0,
+     "contribution_share": 0.6666666666666666
+    },
+    {
+     "side": "short",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  },
+  {
+   "period": "since_inception",
+   "start_day": "2026-08-04",
+   "end_day": "2026-09-12",
+   "days": 40,
+   "total_net_pnl": 192.0,
+   "components": {
+    "price_pnl": 240.0,
+    "funding": -30.0,
+    "fees": -12.0,
+    "slippage": -6.0,
+    "net_pnl": 192.0,
+    "traded_notional": 14400.0
+   },
+   "by_symbol": [
+    {
+     "symbol": "BTCUSDT",
+     "net_pnl": 104.0,
+     "contribution_share": 0.5416666666666666
+    },
+    {
+     "symbol": "ETHUSDT",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    },
+    {
+     "symbol": "SOLUSDT",
+     "net_pnl": 24.000000000000004,
+     "contribution_share": 0.12500000000000003
+    }
+   ],
+   "by_side": [
+    {
+     "side": "long",
+     "net_pnl": 128.0,
+     "contribution_share": 0.6666666666666666
+    },
+    {
+     "side": "short",
+     "net_pnl": 64.0,
+     "contribution_share": 0.3333333333333333
+    }
+   ],
+   "concentration": 0.4,
+   "n_obs": 25,
+   "below_min_active_days": false
+  }
+ ],
+ "regime": [
+  {
+   "bucket": "down",
+   "label": "< -10%",
+   "months": 2,
+   "pnl": 40.0,
+   "hit_rate": 0.5,
+   "avg_exposure": 1.2
+  },
+  {
+   "bucket": "flat",
+   "label": "-10%..+10%",
+   "months": 5,
+   "pnl": -5.0,
+   "hit_rate": 0.4,
+   "avg_exposure": 1.1
+  },
+  {
+   "bucket": "up",
+   "label": "> +10%",
+   "months": 3,
+   "pnl": 90.0,
+   "hit_rate": 0.67,
+   "avg_exposure": 1.3
+  }
+ ],
+ "monthly_net_pnl": {
+  "2026-08": 134.4,
+  "2026-09": 57.6
+ }
+}

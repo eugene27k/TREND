@@ -1,0 +1,106 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "mode": "paper",
+ "state": {
+  "state": "IDLE",
+  "phase": "P1_PAPER",
+  "paused": false,
+  "stopped": false,
+  "safe_mode": false,
+  "halt_reason": "",
+  "governor_g": 1.0,
+  "blocks": [],
+  "context": {},
+  "updated_ts": 1789214400000
+ },
+ "heartbeat": {
+  "enabled": false,
+  "interval_s": 300,
+  "last_ts": 1789214400000,
+  "last_ok": true,
+  "beats_24h": 24,
+  "uptime_24h_pct": 100.0,
+  "uptime_7d_pct": 100.0,
+  "uptime_30d_pct": 100.0
+ },
+ "reconciliation": {
+  "last_ts": 1789214100000,
+  "last_kind": "balance",
+  "last_ok": false,
+  "last_detail": "1.2 USDT drift",
+  "open_breaks": 1,
+  "breaks": [
+   {
+    "id": 2,
+    "ts": 1789214100000,
+    "kind": "balance",
+    "detail": "1.2 USDT drift",
+    "breaks": [
+     {
+      "asset": "USDT",
+      "delta": 1.2
+     }
+    ]
+   }
+  ]
+ },
+ "backup": {
+  "enabled": false,
+  "replica_path": "backups/trend",
+  "last_ok_ts": 1789213500000,
+  "lag_s": 900.0,
+  "restore_check_days": 7
+ },
+ "infra": {
+  "host": "oracle-free",
+  "monthly_cost_eur": 0.0,
+  "max_rss_mb": 1024,
+  "rss_mb": 420.0,
+  "cpu_pct": 8.5,
+  "net_of_infra": 95.0
+ },
+ "alerts": [
+  {
+   "id": 2,
+   "ts": 1789214340000,
+   "severity": "WARN",
+   "code": "DAILY_LOSS",
+   "message": "day loss 6.2% of equity",
+   "acked": false,
+   "delivered": false,
+   "context": {
+    "loss": 0.062
+   }
+  },
+  {
+   "id": 1,
+   "ts": 1789213500000,
+   "severity": "INFO",
+   "code": "BACKUP_OK",
+   "message": "litestream replicated",
+   "acked": false,
+   "delivered": false,
+   "context": {}
+  }
+ ],
+ "unacked_critical": 0,
+ "control_log": [
+  {
+   "id": 1,
+   "ts": 1789210800000,
+   "action": "start",
+   "operator": "operator",
+   "reason": "phase P1",
+   "payload": {}
+  }
+ ],
+ "reports": [
+  {
+   "kind": "daily",
+   "period_key": "2026-09-12",
+   "ts": 1789214400000,
+   "delivered": false
+  }
+ ]
+}

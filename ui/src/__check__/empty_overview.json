@@ -1,0 +1,40 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "kpis": {
+  "equity": 0.0,
+  "since_inception_net": 0.0,
+  "net_30d": 0.0,
+  "realised_vol": null,
+  "vol_target": 0.2,
+  "vol_ratio": null,
+  "max_drawdown": null,
+  "current_drawdown": 0.0,
+  "governor_g": 1.0,
+  "sharpe": null,
+  "sharpe_std_error": null,
+  "sharpe_n_obs": 0,
+  "cash_alternative": null,
+  "gross_notional": 0.0,
+  "net_notional": 0.0,
+  "gross_x": 0.0,
+  "net_x": 0.0,
+  "phase": "P0_BACKTEST",
+  "state": "IDLE",
+  "risk_status": "green",
+  "paused": false,
+  "blocks": [],
+  "below_min_active_days": true
+ },
+ "curve": [],
+ "cumulative_components": {
+  "price_pnl": 0.0,
+  "funding": 0.0,
+  "fees": 0.0,
+  "slippage": 0.0,
+  "net_pnl": 0.0,
+  "traded_notional": 0.0
+ },
+ "by_side": [],
+ "reference_run_id": null
+}

@@ -1,0 +1,370 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "kpis": {
+  "equity": 10120.520516608012,
+  "since_inception_net": 192.0,
+  "net_30d": 144.0,
+  "realised_vol": 0.19,
+  "vol_target": 0.2,
+  "vol_ratio": 0.95,
+  "max_drawdown": 0.08,
+  "current_drawdown": 0.0010000000000000982,
+  "governor_g": 1.0,
+  "sharpe": 1.1,
+  "sharpe_std_error": 0.4,
+  "sharpe_n_obs": 25,
+  "cash_alternative": 40.0,
+  "gross_notional": 4230.0,
+  "net_notional": 1870.0,
+  "gross_x": 0.4179626920432077,
+  "net_x": 0.18477310499309654,
+  "phase": "P1_PAPER",
+  "state": "IDLE",
+  "risk_status": "green",
+  "paused": false,
+  "blocks": [],
+  "below_min_active_days": false
+ },
+ "curve": [
+  {
+   "day": "2026-08-04",
+   "equity": 9990.0,
+   "twr_index": 0.999,
+   "drawdown": 0.0010000000000000009,
+   "cash_alternative": 9990.0,
+   "backtest_reference": 10000.0
+  },
+  {
+   "day": "2026-08-05",
+   "equity": 9999.99,
+   "twr_index": 0.999999,
+   "drawdown": 1.0000000000287557e-06,
+   "cash_alternative": 9991.073523222458,
+   "backtest_reference": 10005.0
+  },
+  {
+   "day": "2026-08-06",
+   "equity": 10009.989989999998,
+   "twr_index": 1.000998999,
+   "drawdown": 0.0,
+   "cash_alternative": 9992.14716180549,
+   "backtest_reference": 10010.0
+  },
+  {
+   "day": "2026-08-07",
+   "equity": 9999.980000009999,
+   "twr_index": 0.9999980000009998,
+   "drawdown": 0.00100000000000008,
+   "cash_alternative": 9993.220915761487,
+   "backtest_reference": 10015.0
+  },
+  {
+   "day": "2026-08-08",
+   "equity": 10009.979980010008,
+   "twr_index": 1.0009979980010009,
+   "drawdown": 1.0000000000233715e-06,
+   "cash_alternative": 9994.294785102851,
+   "backtest_reference": 10020.0
+  },
+  {
+   "day": "2026-08-09",
+   "equity": 10019.989959990016,
+   "twr_index": 1.0019989959990017,
+   "drawdown": 0.0,
+   "cash_alternative": 9995.368769841982,
+   "backtest_reference": 10025.0
+  },
+  {
+   "day": "2026-08-10",
+   "equity": 10009.969970030026,
+   "twr_index": 1.0009969970030026,
+   "drawdown": 0.0010000000000000631,
+   "cash_alternative": 9996.442869991279,
+   "backtest_reference": 10030.0
+  },
+  {
+   "day": "2026-08-11",
+   "equity": 10019.979940000056,
+   "twr_index": 1.0019979940000057,
+   "drawdown": 9.99999999998512e-07,
+   "cash_alternative": 9997.517085563142,
+   "backtest_reference": 10035.0
+  },
+  {
+   "day": "2026-08-12",
+   "equity": 10029.999919940055,
+   "twr_index": 1.0029999919940056,
+   "drawdown": 0.0,
+   "cash_alternative": 9998.591416569976,
+   "backtest_reference": 10040.0
+  },
+  {
+   "day": "2026-08-13",
+   "equity": 10019.969920020116,
+   "twr_index": 1.0019969920020115,
+   "drawdown": 0.0010000000000000412,
+   "cash_alternative": 9999.665863024187,
+   "backtest_reference": 10045.0
+  },
+  {
+   "day": "2026-08-14",
+   "equity": 10029.989889940134,
+   "twr_index": 1.0029989889940134,
+   "drawdown": 1.0000000001778097e-06,
+   "cash_alternative": 10000.740424938178,
+   "backtest_reference": 10050.0
+  },
+  {
+   "day": "2026-08-15",
+   "equity": 10040.019879830073,
+   "twr_index": 1.0040019879830073,
+   "drawdown": 0.0,
+   "cash_alternative": 10001.815102324359,
+   "backtest_reference": 10055.0
+  },
+  {
+   "day": "2026-08-16",
+   "equity": 10029.979859950243,
+   "twr_index": 1.0029979859950242,
+   "drawdown": 0.0010000000000001087,
+   "cash_alternative": 10002.88989519514,
+   "backtest_reference": 10060.0
+  },
+  {
+   "day": "2026-08-17",
+   "equity": 10040.009839810193,
+   "twr_index": 1.0040009839810193,
+   "drawdown": 1.000000000008955e-06,
+   "cash_alternative": 10003.964803562927,
+   "backtest_reference": 10065.0
+  },
+  {
+   "day": "2026-08-18",
+   "equity": 10050.049849650002,
+   "twr_index": 1.0050049849650002,
+   "drawdown": 0.0,
+   "cash_alternative": 10005.039827440132,
+   "backtest_reference": 10070.0
+  },
+  {
+   "day": "2026-08-19",
+   "equity": 10039.999799800353,
+   "twr_index": 1.0039999799800352,
+   "drawdown": 0.0010000000000000295,
+   "cash_alternative": 10006.11496683917,
+   "backtest_reference": 10075.0
+  },
+  {
+   "day": "2026-08-20",
+   "equity": 10050.039799600152,
+   "twr_index": 1.0050039799600152,
+   "drawdown": 1.000000000045543e-06,
+   "cash_alternative": 10007.190221772451,
+   "backtest_reference": 10080.0
+  },
+  {
+   "day": "2026-08-21",
+   "equity": 10060.08983939975,
+   "twr_index": 1.006008983939975,
+   "drawdown": 0.0,
+   "cash_alternative": 10008.265592252395,
+   "backtest_reference": 10085.0
+  },
+  {
+   "day": "2026-08-22",
+   "equity": 10050.02974956035,
+   "twr_index": 1.005002974956035,
+   "drawdown": 0.001000000000000123,
+   "cash_alternative": 10009.341078291416,
+   "backtest_reference": 10090.0
+  },
+  {
+   "day": "2026-08-23",
+   "equity": 10060.07977930991,
+   "twr_index": 1.006007977930991,
+   "drawdown": 1.0000000001758148e-06,
+   "cash_alternative": 10010.416679901933,
+   "backtest_reference": 10095.0
+  },
+  {
+   "day": "2026-08-24",
+   "equity": 10070.139859089219,
+   "twr_index": 1.0070139859089218,
+   "drawdown": 0.0,
+   "cash_alternative": 10011.492397096361,
+   "backtest_reference": 10100.0
+  },
+  {
+   "day": "2026-08-25",
+   "equity": 10060.069719230129,
+   "twr_index": 1.006006971923013,
+   "drawdown": 0.0009999999999999343,
+   "cash_alternative": 10012.568229887129,
+   "backtest_reference": 10105.0
+  },
+  {
+   "day": "2026-08-26",
+   "equity": 10070.129788949358,
+   "twr_index": 1.0070129788949358,
+   "drawdown": 1.0000000000669657e-06,
+   "cash_alternative": 10013.644178286651,
+   "backtest_reference": 10110.0
+  },
+  {
+   "day": "2026-08-27",
+   "equity": 10080.199918738306,
+   "twr_index": 1.0080199918738306,
+   "drawdown": 0.0,
+   "cash_alternative": 10014.720242307358,
+   "backtest_reference": 10115.0
+  },
+  {
+   "day": "2026-08-28",
+   "equity": 10070.119718819567,
+   "twr_index": 1.0070119718819568,
+   "drawdown": 0.0010000000000000013,
+   "cash_alternative": 10015.796421961664,
+   "backtest_reference": 10120.0
+  },
+  {
+   "day": "2026-08-29",
+   "equity": 10080.189838538387,
+   "twr_index": 1.0080189838538387,
+   "drawdown": 1.0000000000473612e-06,
+   "cash_alternative": 10016.872717262006,
+   "backtest_reference": 10125.0
+  },
+  {
+   "day": "2026-08-30",
+   "equity": 10090.270028376925,
+   "twr_index": 1.0090270028376924,
+   "drawdown": 0.0,
+   "cash_alternative": 10017.949128220804,
+   "backtest_reference": 10130.0
+  },
+  {
+   "day": "2026-08-31",
+   "equity": 10080.179758348548,
+   "twr_index": 1.0080179758348549,
+   "drawdown": 0.000999999999999868,
+   "cash_alternative": 10019.025654850488,
+   "backtest_reference": 10135.0
+  },
+  {
+   "day": "2026-09-01",
+   "equity": 10090.259938106896,
+   "twr_index": 1.0090259938106896,
+   "drawdown": 1.0000000000029487e-06,
+   "cash_alternative": 10020.10229716349,
+   "backtest_reference": 10140.0
+  },
+  {
+   "day": "2026-09-02",
+   "equity": 10100.350198045002,
+   "twr_index": 1.0100350198045003,
+   "drawdown": 0.0,
+   "cash_alternative": 10021.17905517224,
+   "backtest_reference": 10145.0
+  },
+  {
+   "day": "2026-09-03",
+   "equity": 10090.249847846957,
+   "twr_index": 1.0090249847846957,
+   "drawdown": 0.0010000000000000662,
+   "cash_alternative": 10022.255928889172,
+   "backtest_reference": 10150.0
+  },
+  {
+   "day": "2026-09-04",
+   "equity": 10100.340097694803,
+   "twr_index": 1.0100340097694804,
+   "drawdown": 1.0000000000389777e-06,
+   "cash_alternative": 10023.332918326718,
+   "backtest_reference": 10155.0
+  },
+  {
+   "day": "2026-09-05",
+   "equity": 10110.440437792497,
+   "twr_index": 1.0110440437792496,
+   "drawdown": 0.0,
+   "cash_alternative": 10024.410023497314,
+   "backtest_reference": 10160.0
+  },
+  {
+   "day": "2026-09-06",
+   "equity": 10100.329997354704,
+   "twr_index": 1.0100329997354704,
+   "drawdown": 0.0009999999999999148,
+   "cash_alternative": 10025.487244413398,
+   "backtest_reference": 10165.0
+  },
+  {
+   "day": "2026-09-07",
+   "equity": 10110.430327352058,
+   "twr_index": 1.0110430327352058,
+   "drawdown": 1.0000000000396659e-06,
+   "cash_alternative": 10026.564581087407,
+   "backtest_reference": 10170.0
+  },
+  {
+   "day": "2026-09-08",
+   "equity": 10120.54075767941,
+   "twr_index": 1.012054075767941,
+   "drawdown": 0.0,
+   "cash_alternative": 10027.642033531778,
+   "backtest_reference": 10175.0
+  },
+  {
+   "day": "2026-09-09",
+   "equity": 10110.42021692173,
+   "twr_index": 1.011042021692173,
+   "drawdown": 0.0010000000000001555,
+   "cash_alternative": 10028.719601758956,
+   "backtest_reference": 10180.0
+  },
+  {
+   "day": "2026-09-10",
+   "equity": 10120.53063713865,
+   "twr_index": 1.012053063713865,
+   "drawdown": 1.0000000003275002e-06,
+   "cash_alternative": 10029.79728578138,
+   "backtest_reference": 10185.0
+  },
+  {
+   "day": "2026-09-11",
+   "equity": 10130.651167775788,
+   "twr_index": 1.0130651167775788,
+   "drawdown": 0.0,
+   "cash_alternative": 10030.875085611495,
+   "backtest_reference": 10190.0
+  },
+  {
+   "day": "2026-09-12",
+   "equity": 10120.520516608012,
+   "twr_index": 1.0120520516608011,
+   "drawdown": 0.0010000000000000982,
+   "cash_alternative": 10031.953001261743,
+   "backtest_reference": 10195.0
+  }
+ ],
+ "cumulative_components": {
+  "price_pnl": 240.0,
+  "funding": -30.0,
+  "fees": -12.0,
+  "slippage": -6.0,
+  "net_pnl": 192.0,
+  "traded_notional": 14400.0
+ },
+ "by_side": [
+  {
+   "side": "long",
+   "net_pnl": 128.0
+  },
+  {
+   "side": "short",
+   "net_pnl": 64.0
+  }
+ ],
+ "reference_run_id": "RUN-1"
+}

@@ -1,0 +1,9 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "size": 16,
+ "current_month": null,
+ "current_symbols": [],
+ "months": [],
+ "illiquid": []
+}

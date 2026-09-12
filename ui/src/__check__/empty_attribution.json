@@ -1,0 +1,128 @@
+{
+ "strategy": "TREND",
+ "as_of_ts": 1789214400000,
+ "periods": [
+  {
+   "period": "7d",
+   "start_day": "2026-09-06",
+   "end_day": "2026-09-12",
+   "days": 7,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  },
+  {
+   "period": "30d",
+   "start_day": "2026-08-14",
+   "end_day": "2026-09-12",
+   "days": 30,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  },
+  {
+   "period": "90d",
+   "start_day": "2026-06-15",
+   "end_day": "2026-09-12",
+   "days": 90,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  },
+  {
+   "period": "mtd",
+   "start_day": "2026-09-01",
+   "end_day": "2026-09-12",
+   "days": 12,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  },
+  {
+   "period": "ytd",
+   "start_day": "2026-01-01",
+   "end_day": "2026-09-12",
+   "days": 255,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  },
+  {
+   "period": "since_inception",
+   "start_day": "2026-09-12",
+   "end_day": "2026-09-12",
+   "days": 1,
+   "total_net_pnl": 0.0,
+   "components": {
+    "price_pnl": 0.0,
+    "funding": 0.0,
+    "fees": 0.0,
+    "slippage": 0.0,
+    "net_pnl": 0.0,
+    "traded_notional": 0.0
+   },
+   "by_symbol": [],
+   "by_side": [],
+   "concentration": null,
+   "n_obs": 0,
+   "below_min_active_days": true
+  }
+ ],
+ "regime": [],
+ "monthly_net_pnl": {}
+}
