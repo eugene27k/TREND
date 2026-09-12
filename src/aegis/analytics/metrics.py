@@ -117,8 +117,9 @@ def quantile(values: Sequence[float], p: float) -> float | None:
 # --------------------------------------------------------------------------- #
 
 
-def sharpe(returns: Sequence[float], rf_annual: float = 0.0,
-           periods: int = YEAR_DAYS) -> tuple[float | None, float | None]:
+def sharpe(
+    returns: Sequence[float], rf_annual: float = 0.0, periods: int = YEAR_DAYS
+) -> tuple[float | None, float | None]:
     """Annualised Sharpe ratio and its standard error.
 
     ``SE = sqrt((1 + 0.5 S^2) / n)`` — the Lo (2002) i.i.d. approximation. It is
@@ -137,8 +138,9 @@ def sharpe(returns: Sequence[float], rf_annual: float = 0.0,
     return value, math.sqrt((1.0 + 0.5 * value * value) / n)
 
 
-def downside_deviation(returns: Sequence[float], target: float = 0.0,
-                       periods: int = YEAR_DAYS) -> float | None:
+def downside_deviation(
+    returns: Sequence[float], target: float = 0.0, periods: int = YEAR_DAYS
+) -> float | None:
     """Annualised deviation of the returns that fell below ``target``.
 
     The denominator is ``n - 1`` over *all* observations (not only the downside
@@ -153,8 +155,7 @@ def downside_deviation(returns: Sequence[float], target: float = 0.0,
     return math.sqrt(sq / (n - 1)) * math.sqrt(periods)
 
 
-def sortino(returns: Sequence[float], rf_annual: float = 0.0,
-            periods: int = YEAR_DAYS) -> float | None:
+def sortino(returns: Sequence[float], rf_annual: float = 0.0, periods: int = YEAR_DAYS) -> float | None:
     """Annualised excess return divided by the annualised downside deviation."""
     r = finite(returns)
     n = len(r)
@@ -181,8 +182,7 @@ def max_drawdown(equity_or_index: Sequence[float]) -> float | None:
     return worst
 
 
-def calmar(returns: Sequence[float], max_dd: float | None,
-           periods: int = YEAR_DAYS) -> float | None:
+def calmar(returns: Sequence[float], max_dd: float | None, periods: int = YEAR_DAYS) -> float | None:
     """Geometric annualised return divided by the maximum drawdown."""
     r = finite(returns)
     n = len(r)
@@ -291,8 +291,9 @@ def cagr(equity: Sequence[float], days: float) -> float | None:
 # --------------------------------------------------------------------------- #
 
 
-def information_ratio(returns: Sequence[float], benchmark_returns: Sequence[float],
-                      periods: int = YEAR_DAYS) -> float | None:
+def information_ratio(
+    returns: Sequence[float], benchmark_returns: Sequence[float], periods: int = YEAR_DAYS
+) -> float | None:
     """Annualised mean active return divided by the annualised tracking error."""
     a, b = paired(returns, benchmark_returns)
     if len(a) < 2:
@@ -351,8 +352,7 @@ def cash_alternative(equity0: float, rf_annual: float, days: float) -> float | N
     return equity0 * ((1.0 + rf_annual) ** (days / YEAR_DAYS) - 1.0)
 
 
-def net_of_infra(net_pnl: float, monthly_cost_eur: float, days: float,
-                 eur_usdt: float = 1.0) -> float | None:
+def net_of_infra(net_pnl: float, monthly_cost_eur: float, days: float, eur_usdt: float = 1.0) -> float | None:
     """Net P&L after the hosting bill for the same window.
 
     The monthly cost is pro-rated on the 365-day year (``12 months / 365 days``)

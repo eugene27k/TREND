@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from datetime import date
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -109,16 +110,50 @@ def test_us_t04_ac1_series_rejects_mismatched_bar_days() -> None:
         compute_signal_series(C1_PRICES[:5], c1_config(), "BTCUSDT", [date(2026, 1, 1)])
 
 
-def test_us_t04_ac1_snapshot_row_carries_every_intermediate() -> None:
+def signal_snapshot_columns() -> set[str]:
+    """The real column names of ``signal_snapshots`` (storage migration 002)."""
+    sql = (Path(__file__).parents[2] / "src/aegis/storage/migrations/002_trend.sql").read_text()
+    body = sql.split("CREATE TABLE IF NOT EXISTS signal_snapshots (", 1)[1].split(");", 1)[0]
+    names = set()
+    for line in body.splitlines():
+        for column in line.strip().rstrip(",").split(","):
+            head = column.strip().split(" ")[0]
+            if head and head.upper() not in {"PRIMARY", "KEY"}:
+                names.add(head)
+    return names
+
+
+def test_us_t04_ac4_snapshot_row_carries_every_intermediate() -> None:
     cfg = c1_config()
-    row = signal_snapshot_row(compute_signal(C1_PRICES, cfg, "BTCUSDT", date(2026, 1, 2)), cfg, source="rest")
+    row = signal_snapshot_row(compute_signal(C1_PRICES, cfg, "BTCUSDT", date(2026, 1, 2)), cfg)
     assert row["symbol"] == "BTCUSDT"
-    assert row["bar_day"] == "2026-01-02"
-    assert row["source"] == "rest"
+    assert row["day"] == "2026-01-02"
+    assert row["bar_ts"] == 1767312000000
+    assert row["warm"] is True
     assert row["signal"] == pytest.approx(C1_SIGNAL, abs=TOL)
-    assert row["x_2_6"] == pytest.approx(C1_EXPECTED[0][1], abs=TOL)
-    assert row["u_8_24"] == pytest.approx(C1_EXPECTED[2][4], abs=TOL)
-    assert signal_snapshot_row(compute_signal(C1_PRICES, cfg), cfg)["bar_day"] is None
+    for k, (_pair, x, y, z, u) in enumerate(C1_EXPECTED, start=1):
+        assert row[f"x{k}"] == pytest.approx(x, abs=TOL)
+        assert row[f"y{k}"] == pytest.approx(y, abs=TOL)
+        assert row[f"z{k}"] == pytest.approx(z, abs=TOL)
+        assert row[f"u{k}"] == pytest.approx(u, abs=TOL)
+    assert signal_snapshot_row(compute_signal(C1_PRICES, cfg), cfg)["day"] is None
+
+
+def test_us_t04_ac4_snapshot_row_keys_are_real_signal_snapshots_columns() -> None:
+    """A flattener whose keys are not the table's columns cannot be written."""
+    columns = signal_snapshot_columns()
+    assert {"day", "symbol", "signal", "warm", "bar_ts", "x1", "u3"} <= columns
+    row = signal_snapshot_row(compute_signal(C1_PRICES, c1_config(), "BTCUSDT", date(2026, 1, 2)), c1_config())
+    assert set(row) <= columns
+
+
+def test_us_t04_ac4_snapshot_row_extras_cannot_overwrite_a_computed_number() -> None:
+    cfg = c1_config()
+    result = compute_signal(C1_PRICES, cfg, "BTCUSDT", date(2026, 1, 2))
+    row = signal_snapshot_row(result, cfg, strategy="TREND", signal=99.0, warm=False)
+    assert row["strategy"] == "TREND"
+    assert row["signal"] == pytest.approx(C1_SIGNAL, abs=TOL)
+    assert row["warm"] is True
 
 
 # --------------------------------------------------------------------------- #
@@ -304,3 +339,25 @@ def test_us_t04_ac2_empty_pairs_and_bad_norm_raise_config_error() -> None:
 def test_us_t04_ac1_non_numeric_prices_raise_config_error() -> None:
     with pytest.raises(ConfigError):
         compute_signal(["not-a-price", "either"], PROD)
+
+
+def test_us_t04_ac1_non_numeric_pandas_series_raises_config_error() -> None:
+    pd = pytest.importorskip("pandas")
+    with pytest.raises(ConfigError):
+        compute_signal(pd.Series(["not-a-price", "either"]), PROD)
+
+
+def test_us_t04_ac1_two_dimensional_prices_raise_config_error() -> None:
+    """A matrix must not be flattened into an invented price history."""
+    with pytest.raises(ConfigError):
+        compute_signal([[100.0, 101.0], [102.0, 103.0]], c1_config())
+    with pytest.raises(ConfigError):
+        compute_signal_series(np.zeros((4, 2)), c1_config())
+
+
+@pytest.mark.parametrize("pairs", [((0, 6),), ((-2, 6),), ((6, 2),)])
+def test_us_t04_ac2_invalid_ema_spans_raise_config_error(pairs: tuple[tuple[int, int], ...]) -> None:
+    """Bad spans are a configuration fault, not a pandas ValueError."""
+    cfg = SignalConfig.model_construct(**{**C1_PARAMS, "pairs": pairs, "ddof": 1})
+    with pytest.raises(ConfigError):
+        compute_signal(C1_PRICES, cfg)

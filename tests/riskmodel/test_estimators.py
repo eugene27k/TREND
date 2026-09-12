@@ -100,15 +100,22 @@ def test_us_t05_ac1_vol_series_is_clamped_like_the_point_estimator() -> None:
 # --------------------------------------------------------------------------- #
 
 
-def test_us_t05_empty_returns_fall_back_to_the_floor() -> None:
-    assert ewma_vol([]) == 0.30
-    assert ewma_vol([], floor=0.45) == 0.45
+def test_us_t05_empty_returns_fall_back_to_the_cap_not_the_floor() -> None:
+    # raw_i = signal * (sigma_tgt / sigma_i) / N * E: the *smallest* admissible
+    # vol is the *largest* admissible position, so a symbol with no history must
+    # get the cap. Falling back to the floor would size a data-less symbol at the
+    # estimator's maximum (Invariant 1 — no autonomous risk escalation).
+    assert ewma_vol([]) == 3.00
+    assert ewma_vol([], cap=2.0) == 2.0
+    assert ewma_vol([], floor=0.45) == 3.00
+    # Concretely: the fallback must not out-size a symbol with real history.
+    assert ewma_vol([]) > ewma_vol(C2_RETURNS, C2_HALF_LIFE)
 
 
 def test_us_t05_single_return_uses_the_seed_variance() -> None:
+    # Appendix C.2 seeds the recursion at r_0**2, so one observation is a valid
+    # (if unreliable) estimate — there is no observation-count gate.
     assert ewma_vol([0.04], floor=0.0) == pytest.approx(0.04 * math.sqrt(365), abs=1e-12)
-    # Short samples are still estimated: min_obs is a reliability marker, not a gate.
-    assert ewma_vol([0.04], min_obs=500, floor=0.0) == pytest.approx(0.04 * math.sqrt(365), abs=1e-12)
 
 
 def test_us_t05_all_zero_returns_give_zero_variance_and_are_floored() -> None:
@@ -128,13 +135,9 @@ def test_us_t05_rejects_bad_parameters() -> None:
     with pytest.raises(ConfigError):
         ewma_vol(C2_RETURNS, annualisation_days=0)
     with pytest.raises(ConfigError):
-        ewma_vol(C2_RETURNS, min_obs=-1)
-    with pytest.raises(ConfigError):
         ewma_vol([0.01, float("nan")])
     with pytest.raises(ConfigError):
         ewma_vol_series([0.01, math.inf])
-    with pytest.raises(ConfigError):
-        ewma_vol_series(C2_RETURNS, min_obs=-1)
     with pytest.raises(ConfigError):
         ewma_vol_series(C2_RETURNS, annualisation_days=-5)
     with pytest.raises(ConfigError):
@@ -249,9 +252,18 @@ def test_us_t05_ac2_symbol_absent_from_returns_is_absent_from_the_model() -> Non
     assert "ZZZUSDT" not in rm.n_obs
     # A symbol present with an empty series is kept, floored, and marked 0 obs.
     rm2 = ewma_cov({"AAAUSDT": _returns(80, seed=SEED), "ZZZUSDT": []})
-    assert rm2.vols["ZZZUSDT"] == 0.30
+    assert rm2.vols["ZZZUSDT"] == 3.00  # no history -> the conservative end
     assert rm2.n_obs["ZZZUSDT"] == 0
     assert rm2.corr[0][1] == 0.0  # no qualifying pair -> avg_corr 0.0
+
+
+def test_us_t05_ac2_zero_common_observations_never_pair_the_full_series() -> None:
+    # ``x[-0:]`` is ``x[:]``: an empty overlap must be skipped explicitly, or the
+    # right-aligned slice silently compares the two *whole* series (and
+    # zip(strict=True) raises a bare ValueError when the lengths differ).
+    rm = ewma_cov({"AAAUSDT": _returns(200, seed=SEED), "ZZZUSDT": []}, min_obs=0)
+    assert rm.avg_corr == 0.0
+    assert rm.corr == ((1.0, 0.0), (0.0, 1.0))
 
 
 def test_us_t05_ac2_empty_universe_returns_an_empty_model() -> None:
@@ -260,6 +272,60 @@ def test_us_t05_ac2_empty_universe_returns_an_empty_model() -> None:
     assert rm.corr == ()
     assert rm.avg_corr == 0.0
     assert rm.cov_matrix() == []
+
+
+def _ewma_corr_reference(a: list[float], b: list[float], half_life: float) -> float:
+    """Section 5.4 EWMA correlation, written out here from the spec recursion.
+
+    Deliberately independent of ``estimators``: every other correlation
+    assertion in this file compares ``ewma_cov`` with another ``ewma_cov`` call,
+    which would pass even if the covariance half-life were ignored entirely.
+    """
+    lam = 2.0 ** (-1.0 / half_life)
+
+    def ewma(x: list[float], y: list[float]) -> float:
+        c = 0.0
+        for i, (p, q) in enumerate(zip(x, y, strict=True)):
+            c = p * q if i == 0 else lam * c + (1.0 - lam) * p * q
+        return c
+
+    return ewma(a, b) / math.sqrt(ewma(a, a) * ewma(b, b))
+
+
+#: Two hand-written series; short enough that the reference is checkable by eye.
+_PAIR_A = [0.02, -0.01, 0.015, -0.03, 0.01, 0.005, -0.02, 0.025, -0.005, 0.01]
+_PAIR_B = [0.01, -0.02, 0.005, -0.01, 0.02, -0.005, -0.015, 0.01, 0.0, 0.02]
+
+
+def test_us_t05_ac2_correlation_matches_an_independently_computed_ewma() -> None:
+    rm = ewma_cov({"AAAUSDT": _PAIR_A, "BBBUSDT": _PAIR_B}, min_obs=len(_PAIR_A))
+    expected = _ewma_corr_reference(_PAIR_A, _PAIR_B, 20.0)
+    assert expected == pytest.approx(0.899509, abs=TOL)  # pins the reference itself
+    assert rm.corr[0][1] == pytest.approx(expected, abs=TOL)
+    assert rm.avg_corr == pytest.approx(expected, abs=TOL)
+
+
+def test_us_t05_ac2_covariance_half_life_is_the_20_day_default_and_is_honoured() -> None:
+    returns = {"AAAUSDT": _PAIR_A, "BBBUSDT": _PAIR_B}
+    n = len(_PAIR_A)
+    # The documented default is 20 days, not the 10-day vol half-life.
+    assert ewma_cov(returns, min_obs=n).corr[0][1] == pytest.approx(
+        _ewma_corr_reference(_PAIR_A, _PAIR_B, 20.0), abs=TOL
+    )
+    for hl in (5.0, 40.0):
+        assert ewma_cov(returns, hl, min_obs=n).corr[0][1] == pytest.approx(
+            _ewma_corr_reference(_PAIR_A, _PAIR_B, hl), abs=TOL
+        )
+    # ...and the half-life actually moves the estimate, so the check has teeth.
+    assert ewma_cov(returns, 5.0, min_obs=n).corr[0][1] != pytest.approx(
+        ewma_cov(returns, 40.0, min_obs=n).corr[0][1], abs=1e-3
+    )
+
+
+def test_us_t05_ac2_pairwise_sample_is_right_aligned_on_the_shared_days() -> None:
+    long_leg = [0.05, -0.06, *_PAIR_A]  # two extra *older* days
+    rm = ewma_cov({"AAAUSDT": long_leg, "BBBUSDT": _PAIR_B}, min_obs=len(_PAIR_B))
+    assert rm.corr[0][1] == pytest.approx(_ewma_corr_reference(_PAIR_A, _PAIR_B, 20.0), abs=TOL)
 
 
 # --------------------------------------------------------------------------- #
@@ -319,6 +385,12 @@ def test_us_t05_avg_corr_substitution_is_repaired_into_a_psd_matrix() -> None:
 # --------------------------------------------------------------------------- #
 # AC3 — build_risk_model
 # --------------------------------------------------------------------------- #
+
+
+def test_us_t05_nearest_psd_never_silently_returns_a_non_psd_matrix() -> None:
+    bad = [[1.0, 0.9, -0.9], [0.9, 1.0, 0.9], [-0.9, 0.9, 1.0]]
+    with pytest.raises(ConfigError):
+        nearest_psd(bad, max_iter=0)  # a budget too small to repair must be loud
 
 
 def test_us_t05_ac3_build_risk_model_carries_everything_a_snapshot_needs() -> None:

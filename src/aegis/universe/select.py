@@ -65,9 +65,17 @@ class _Candidate:
 
 
 def _month_start(month: str) -> date:
-    """``"2022-03"`` -> ``date(2022, 3, 1)``. The point-in-time cut-off."""
+    """``"2022-03"`` -> ``date(2022, 3, 1)``. The point-in-time cut-off.
+
+    Strictly ``YYYY-MM``, zero-padded: ``universe_history.month`` is ordered and
+    looked up as a *string* (``MAX(month)`` in ``UniverseRepo.latest_month``,
+    ``clock.month_key()`` for the lookup), so a lenient ``"2022-3"`` would sort
+    after ``"2022-12"`` and never match a stored month again.
+    """
     try:
         year_s, month_s = month.split("-")
+        if len(year_s) != 4 or len(month_s) != 2 or not (year_s + month_s).isdigit():
+            raise ValueError(month)
         return date(int(year_s), int(month_s), 1)
     except (ValueError, AttributeError) as exc:
         raise ConfigError(f"universe month must be YYYY-MM, got {month!r}") from exc
@@ -113,10 +121,18 @@ def select_universe(
     ``size`` with ``force_include`` displacing the weakest non-forced names. Only
     bars dated before the first of ``month`` are consulted.
 
-    Raises ``ConfigError`` if ``month`` is not ``YYYY-MM``. An empty
-    ``exchange_info`` yields an empty result, not an error: a universe can be empty.
+    Raises ``ConfigError`` if ``month`` is not ``YYYY-MM`` or the volume window is
+    empty. An empty ``exchange_info`` is not an error — a universe can be empty; it
+    yields a result whose only entries are the ``force_include`` names, each marked
+    not listed in ``exchangeInfo``.
     """
     cutoff = _month_start(month)
+    if params.volume_window_days < 1:
+        # ``bars[-0:]`` is the whole history, not an empty window: an unnoticed
+        # zero here would rank on 400 days instead of 30.
+        raise ConfigError(
+            f"universe.volume_window_days must be >= 1, got {params.volume_window_days}"
+        )
     forced = tuple(params.force_include)
 
     candidates: list[_Candidate] = []
@@ -172,6 +188,10 @@ def select_universe(
 
     included = [c for c in top if c.symbol not in displaced] + forced_below
     included.sort(key=lambda c: rank_of[c.symbol])
+    # ``size`` is a hard cap, not a target: sizing divides by a fixed N (Section
+    # 5.5), so an extra name would lever the book. Only bites when there are more
+    # forced symbols than seats, where the best-ranked forced names keep theirs.
+    included = included[: params.size]
     included_symbols = {c.symbol for c in included}
 
     entries: list[UniverseEntry] = []

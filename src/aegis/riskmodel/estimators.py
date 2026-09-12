@@ -82,24 +82,24 @@ def ewma_vol(
     floor: float = 0.30,
     cap: float = 3.00,
     annualisation_days: int = 365,
-    min_obs: int = 20,
 ) -> float:
     """Annualised EWMA volatility of daily log returns, clamped to ``[floor, cap]``.
 
-    ``min_obs`` is a *reliability* marker, not a gate: the Appendix C.2 vector is
-    ten observations long and must still reproduce 0.352121 exactly, so a short
-    sample is estimated normally and the clamp bounds the damage. Callers that
-    care read ``RiskModel.n_obs``; an empty sample has nothing to estimate from
-    and falls back to the floor, which is the conservative direction (a larger
-    ``sigma_i`` is a smaller position).
+    A short sample is still estimated: the Appendix C.2 vector is ten
+    observations long and must reproduce 0.352121 exactly, so there is no
+    observation-count gate here — callers that care read ``RiskModel.n_obs``.
+
+    An *empty* sample has nothing to estimate from and falls back to the **cap**.
+    Section 5.5 divides by ``sigma_i``, so the smallest admissible vol is the
+    largest admissible position: handing a symbol with no history the floor
+    would size it to the maximum the estimator can produce. The cap is the
+    conservative end (Invariant 1 — the engine never raises risk on its own).
     """
     _check_bounds(floor, cap)
     _check_annualisation(annualisation_days)
-    if min_obs < 0:
-        raise ConfigError(f"min_obs must be >= 0, got {min_obs!r}")
     r = _clean(returns, what="ewma_vol")
     if not r:
-        return floor
+        return cap
     lam = decay(half_life)
     v = _variance_path(r, lam)[-1]
     sigma = math.sqrt(max(v, 0.0)) * math.sqrt(annualisation_days)
@@ -113,7 +113,6 @@ def ewma_vol_series(
     floor: float = 0.30,
     cap: float = 3.00,
     annualisation_days: int = 365,
-    min_obs: int = 20,
 ) -> list[float]:
     """``ewma_vol`` evaluated at every point of the series (for the backtester).
 
@@ -122,8 +121,6 @@ def ewma_vol_series(
     """
     _check_bounds(floor, cap)
     _check_annualisation(annualisation_days)
-    if min_obs < 0:
-        raise ConfigError(f"min_obs must be >= 0, got {min_obs!r}")
     r = _clean(returns, what="ewma_vol_series")
     if not r:
         return []
@@ -185,7 +182,7 @@ def nearest_psd(
         raise ConfigError("correlation matrix contains non-finite entries")
 
     m = 0.5 * (m + m.T)
-    for _ in range(max_iter):
+    for _ in range(max_iter + 1):
         eigenvalues, eigenvectors = np.linalg.eigh(m)
         if eigenvalues.min() >= -1e-12:
             break
@@ -193,6 +190,13 @@ def nearest_psd(
         d = np.sqrt(np.clip(np.diag(m), 1e-300, None))
         m = m / np.outer(d, d)
         m = 0.5 * (m + m.T)
+    else:
+        # Never return a matrix that still fails the invariant the whole function
+        # exists to establish: sizing would take sqrt of a negative variance.
+        raise ConfigError(
+            f"correlation matrix is not positive semidefinite after {max_iter} repair "
+            f"iterations (minimum eigenvalue {float(eigenvalues.min())!r})"
+        )
 
     np.fill_diagonal(m, 1.0)
     m = np.clip(m, -1.0, 1.0)
@@ -219,7 +223,11 @@ def _correlation_matrix(
         for j in range(i + 1, n):
             b_full = series[symbols[j]]
             common = min(len(a_full), len(b_full))
-            if common < min_obs:
+            # ``common == 0`` must be skipped explicitly: ``x[-0:]`` is ``x[:]``,
+            # so a right-aligned slice of an empty overlap would silently pair the
+            # two *full* series (and ``zip(strict=True)`` would raise a bare
+            # ValueError when they differ in length).
+            if common == 0 or common < min_obs:
                 continue
             # Right-align: the common sample is the most recent `common` days.
             rho = _pair_correlation(a_full[-common:], b_full[-common:], lam)
@@ -291,7 +299,6 @@ def build_risk_model(
             floor=vol_cfg.floor,
             cap=vol_cfg.cap,
             annualisation_days=vol_cfg.annualisation_days,
-            min_obs=vol_cfg.min_obs,
         )
         for s in symbols
     }

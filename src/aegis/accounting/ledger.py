@@ -92,19 +92,25 @@ class LedgerService:
     def _pull(self, start_ms: int, end_ms: int) -> int:
         rows: list[dict[str, Any]] = []
         cursor = start_ms
+        page = self.page_limit
         failure: GatewayError | None = None
         try:
             for _ in range(MAX_PAGES):
-                batch = self.ctx.gateway.income(cursor, end_ms, self.page_limit)
+                batch = self.ctx.gateway.income(cursor, end_ms, page)
                 if not batch:
                     break
                 rows.extend(batch)
-                if len(batch) < self.page_limit:
+                if len(batch) < page:
                     break
                 last = max(_int(r.get("time")) for r in batch)
-                # A full page that does not advance time would loop forever; step
-                # one millisecond past it. Re-reading a boundary row is harmless.
-                cursor = last if last > cursor else last + 1
+                if last > cursor:
+                    cursor, page = last, self.page_limit
+                else:
+                    # A full page that does not advance the cursor means more rows
+                    # share this millisecond than the page holds. Stepping past it
+                    # would silently drop them, so widen the page instead; the
+                    # window is re-read and the idempotent insert absorbs it.
+                    page *= 2
         except GatewayError as exc:
             failure = exc
 

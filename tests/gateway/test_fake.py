@@ -609,6 +609,13 @@ def test_set_account_pins_the_fields_a_test_names(gw: FakeGateway) -> None:
     assert gw.account().margin_ratio == pytest.approx(0.2)
 
 
+def test_set_account_can_pin_a_field_without_moving_the_wallet(gw: FakeGateway) -> None:
+    state = gw.set_account(maint_margin=2_000.0)
+    assert state.maint_margin == pytest.approx(2_000.0)
+    assert state.wallet_balance == pytest.approx(10_000.0)
+    assert gw.sim.wallet_balance == pytest.approx(10_000.0)
+
+
 # --------------------------------------------------------------------------- #
 # Funding sign convention (Section 5.6)
 # --------------------------------------------------------------------------- #

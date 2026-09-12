@@ -295,10 +295,10 @@ class PaperGateway:
 
     def _poll_resting_orders(self) -> None:
         for order in list(self.books.open()):
-            if order.price is None:
-                continue
             book = self._book_or_none(order.symbol)
-            if book is None:
+            # A resting order always carries a limit price (market orders are
+            # taker-filled at placement), but a book can be missing.
+            if order.price is None or book is None:
                 continue
             traded_through = (
                 book.ask_price > 0 and book.ask_price <= order.price

@@ -68,6 +68,23 @@ def test_us_t04_ac3_response_peaks_at_sqrt_two_and_decays() -> None:
     assert math.isnan(response(float("nan")))
 
 
+def test_us_t04_ac3_engine_u_is_exactly_the_response_function_of_z() -> None:
+    """The blow-off protection the tests above exercise is the one that sizes positions.
+
+    ``compute_signal`` must not carry a second, drifting copy of the response
+    arithmetic: every warm ``u`` equals ``response(z)`` bit for bit.
+    """
+    prices = drift_series(+0.004, 400, sd=0.01, seed=0)
+    warm_bars = 0
+    for bar in compute_signal_series(prices, PROD_LIKE):
+        if not bar.warm:
+            continue
+        warm_bars += 1
+        for z, u in zip(bar.z, bar.u, strict=True):
+            assert u == response(z, PROD_LIKE.response_norm)
+    assert warm_bars > 50
+
+
 def test_us_t04_ac3_overextended_trend_gets_a_smaller_u_than_a_moderate_one() -> None:
     moderate, overextended = 1.4, 3.0
     assert abs(response(overextended)) < abs(response(moderate))

@@ -497,3 +497,58 @@ def test_user_trades_and_open_orders_are_local(paper: PaperGateway, inner: FakeG
     assert [o.order_id for o in paper.open_orders("BTCUSDT")] == [resting.order_id]
     assert len(paper.user_trades("BTCUSDT")) == 1
     assert inner.user_trades("BTCUSDT") == []
+
+
+# --------------------------------------------------------------------------- #
+# poll() corners
+# --------------------------------------------------------------------------- #
+
+
+def test_a_market_order_is_a_taker_whatever_its_time_in_force(paper: PaperGateway) -> None:
+    """Nothing can rest without a limit price, so MARKET always crosses at once."""
+    order = paper.place_order(_req(order_type=OrderType.MARKET, price=None, time_in_force=TimeInForce.GTX))
+    assert order.status is OrderStatus.FILLED
+    assert paper.user_trades("BTCUSDT")[0].is_maker is False
+    assert paper.open_orders() == []
+
+
+def test_a_resting_order_on_a_symbol_with_no_book_is_skipped(clock: FakeClock, cfg: AppConfig) -> None:
+    bare = FakeGateway(clock)
+    bare.set_symbol_info("BTCUSDT", tick_size=0.1, step_size=0.001, min_qty=0.001, min_notional=0.0)
+    gw = PaperGateway(bare, clock, cfg)
+    order = gw.place_order(_req(price=99.9))
+    gw.poll()
+    assert gw.get_order("BTCUSDT", order.order_id).status is OrderStatus.NEW
+
+
+def test_funding_is_skipped_for_a_symbol_that_has_been_closed_out(
+    paper: PaperGateway, inner: FakeGateway, clock: FakeClock
+) -> None:
+    paper.place_order(_ioc(side=Side.BUY, qty=1.0))
+    paper.place_order(_ioc(side=Side.SELL, qty=1.0, reduce_only=True))
+    assert paper.sim.position_qty("BTCUSDT") == 0.0
+    inner.set_funding("BTCUSDT", [(clock.now_ms() + 1_000, 0.01)])
+    clock.advance(seconds=2)
+    paper.poll()
+    assert paper.sim.funding_paid == 0.0
+
+
+def test_a_gateway_that_ignores_the_start_window_still_books_funding_once(
+    clock: FakeClock, cfg: AppConfig
+) -> None:
+    """The guard against double-booking is the applied-watermark, not the query."""
+
+    class LooseFunding(FakeGateway):
+        def funding_history(self, symbol, start_ms=None, end_ms=None):
+            return super().funding_history(symbol)
+
+    loose = LooseFunding(clock)
+    loose.set_symbol_info("BTCUSDT", tick_size=0.1, step_size=0.001, min_qty=0.001, min_notional=5.0)
+    loose.set_book("BTCUSDT", 99.9, 100.1)
+    gw = PaperGateway(loose, clock, cfg, starting_balance=10_000.0)
+    gw.place_order(_ioc(side=Side.BUY, qty=2.0))
+    loose.set_funding("BTCUSDT", [(clock.now_ms() + 1_000, 0.0001)])
+    clock.advance(seconds=2)
+    gw.poll()
+    gw.poll()
+    assert gw.sim.funding_paid == pytest.approx(-0.02)

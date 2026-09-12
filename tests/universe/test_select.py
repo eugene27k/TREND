@@ -299,7 +299,28 @@ def test_us_t02_ac1_missing_volume_history_is_treated_as_no_history() -> None:
     assert result.entry("AAAUSDT").reason == "excluded: 0 < 400 days history"
 
 
-@pytest.mark.parametrize("bad", ["2022", "2022-13-01x", "march", ""])
+@pytest.mark.parametrize(
+    "bad",
+    ["2022", "2022-13-01x", "march", "", "2022-3", "22-03", " 2022-03", "2022-03 ", "2022-00"],
+)
 def test_us_t02_ac1_malformed_month_raises_config_error(bad: str) -> None:
+    # universe_history.month is ordered and looked up as a string, so "2022-3"
+    # (which sorts after "2022-12") is as malformed as "march".
     with pytest.raises(ConfigError):
         select_universe({}, {}, PARAMS, bad)
+
+
+def test_us_t02_ac1_a_zero_volume_window_is_a_config_error_not_a_400_day_median() -> None:
+    # bars[-0:] is the whole history: ranking on 400 days while the operator
+    # believes the window is empty must not pass silently.
+    with pytest.raises(ConfigError):
+        universe_of({"AAAUSDT": {"vol": 1e6}}, params=UniverseConfig(volume_window_days=0))
+
+
+def test_us_t02_ac1_size_is_a_hard_cap_even_with_more_forced_symbols_than_seats() -> None:
+    # Sizing divides by a fixed N (5.5); a universe larger than `size` levers the
+    # book. With one seat and two forced names the better-ranked forced name keeps it.
+    specs = {"ALT00USDT": {"vol": 9e9}, "BTCUSDT": {"vol": 1.0}, "ETHUSDT": {"vol": 2.0}}
+    result = universe_of(specs, params=UniverseConfig(size=1))
+    assert result.symbols == ("ETHUSDT",)  # rank 2 beats BTC's rank 3
+    assert result.entry("BTCUSDT").included is False

@@ -198,6 +198,12 @@ class SnapshotRepo(_Repo):
             (self.s, ts_ms),
         )
 
+    def first(self) -> dict[str, Any] | None:
+        """Oldest snapshot — the anchor the balance reconciliation sums forward from."""
+        return self.db.query_one(
+            "SELECT * FROM snapshots WHERE strategy = ? ORDER BY ts LIMIT 1", (self.s,)
+        )
+
 
 class EquityCurveRepo(_Repo):
     def upsert(self, day: date | str, point: EquityPoint, *, peak_index: float, drawdown: float) -> None:
@@ -446,6 +452,29 @@ class BarRepo(_Repo):
                limit: int | None = None) -> list[float]:
         return [b.close for b in self.series(symbol, end=end, limit=limit)]
 
+    def realised_series(self, symbol: str, *, start: date | str | None = None,
+                        end: date | str | None = None, limit: int | None = None) -> list[DailyBar]:
+        """Bars that actually traded — forward-filled rows excluded (US-T03 AC 2).
+
+        Separate from ``series`` rather than a flag on it so that P&L, fee and
+        liquidity queries cannot pick up a synthetic bar by forgetting an
+        argument. ``limit`` counts realised bars, so a gap does not shorten the
+        window the caller asked for.
+        """
+        sql = "SELECT * FROM daily_bars WHERE strategy = ? AND symbol = ? AND filled = 0"
+        params: list[Any] = [self.s, symbol]
+        if start is not None:
+            sql += " AND day >= ?"
+            params.append(_day(start))
+        if end is not None:
+            sql += " AND day <= ?"
+            params.append(_day(end))
+        sql += " ORDER BY day"
+        rows = self.db.query(sql, params)
+        if limit is not None and len(rows) > limit:
+            rows = rows[-limit:]
+        return [self._to_bar(r) for r in rows]
+
     def latest_day(self, symbol: str) -> str | None:
         return self.db.scalar(
             "SELECT MAX(day) FROM daily_bars WHERE strategy = ? AND symbol = ?", (self.s, symbol)
@@ -502,6 +531,14 @@ class SignalRepo(_Repo):
             (self.s, symbol, limit),
         )
         return list(reversed(rows))
+
+    def between(self, start: date | str, end: date | str) -> list[dict[str, Any]]:
+        """Every snapshot in a closed day range — the signal-statistics window query."""
+        return self.db.query(
+            "SELECT * FROM signal_snapshots WHERE strategy = ? AND day >= ? AND day <= ?"
+            " ORDER BY day, symbol",
+            (self.s, _day(start), _day(end)),
+        )
 
     def latest_day(self) -> str | None:
         return self.db.scalar("SELECT MAX(day) FROM signal_snapshots WHERE strategy = ?", (self.s,))
@@ -607,6 +644,16 @@ class RebalanceRepo(_Repo):
             "SELECT * FROM rebalances WHERE strategy = ? AND day = ? ORDER BY started_ts",
             (self.s, _day(day)),
         )
+
+    def between(self, start: date | str, end: date | str, *, kind: str | None = None) -> list[dict[str, Any]]:
+        """Rebalances in a closed day range — the analytics window query."""
+        sql = "SELECT * FROM rebalances WHERE strategy = ? AND day >= ? AND day <= ?"
+        params: list[Any] = [self.s, _day(start), _day(end)]
+        if kind is not None:
+            sql += " AND kind = ?"
+            params.append(kind)
+        sql += " ORDER BY day, started_ts"
+        return self.db.query(sql, params)
 
     def consecutive_failures(self, before_day: date | str, threshold_pct: float, days: int) -> int:
         """How many of the last ``days`` scheduled rebalances fell below ``threshold_pct``."""
@@ -730,6 +777,20 @@ class GovernorRepo(_Repo):
         )
         return list(reversed(rows))
 
+    def between(self, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+        return self.db.query(
+            "SELECT * FROM governor_state WHERE strategy = ? AND ts >= ? AND ts < ? ORDER BY ts, id",
+            (self.s, start_ms, end_ms),
+        )
+
+    def last_before(self, ts_ms: int) -> dict[str, Any] | None:
+        """The state in force at ``ts_ms`` — the time-in-state walk starts here."""
+        return self.db.query_one(
+            "SELECT * FROM governor_state WHERE strategy = ? AND ts <= ? ORDER BY ts DESC, id DESC"
+            " LIMIT 1",
+            (self.s, ts_ms),
+        )
+
 
 class SymbolPnlRepo(_Repo):
     def upsert_many(self, day: date | str, rows: Iterable[dict[str, Any]]) -> None:
@@ -766,6 +827,30 @@ class SymbolPnlRepo(_Repo):
         )
         return {r["side"]: float(r["total"] or 0.0) for r in rows}
 
+    def by_month(self, start: date | str, end: date | str, *, symbol: str | None = None) -> dict[str, float]:
+        """Net P&L per ``YYYY-MM`` (US-T14 AC 2), optionally for one symbol."""
+        sql = (
+            "SELECT substr(day, 1, 7) AS month, SUM(net_pnl) AS total FROM symbol_pnl_daily"
+            " WHERE strategy = ? AND day >= ? AND day <= ?"
+        )
+        params: list[Any] = [self.s, _day(start), _day(end)]
+        if symbol is not None:
+            sql += " AND symbol = ?"
+            params.append(symbol)
+        rows = self.db.query(sql + " GROUP BY month ORDER BY month", params)
+        return {r["month"]: float(r["total"] or 0.0) for r in rows}
+
+    def components(self, start: date | str, end: date | str) -> dict[str, float]:
+        """Period totals of each P&L component — the roll-up the reports print."""
+        row = self.db.query_one(
+            "SELECT SUM(price_pnl) AS price_pnl, SUM(funding) AS funding, SUM(fees) AS fees,"
+            " SUM(slippage) AS slippage, SUM(net_pnl) AS net_pnl, SUM(traded_notional) AS traded_notional"
+            " FROM symbol_pnl_daily WHERE strategy = ? AND day >= ? AND day <= ?",
+            (self.s, _day(start), _day(end)),
+        )
+        keys = ("price_pnl", "funding", "fees", "slippage", "net_pnl", "traded_notional")
+        return {k: float((row or {}).get(k) or 0.0) for k in keys}
+
 
 class TradeRepo(_Repo):
     def upsert(self, trade: dict[str, Any]) -> None:
@@ -790,6 +875,14 @@ class TradeRepo(_Repo):
         return self.db.query(
             "SELECT * FROM trades WHERE strategy = ? AND close_ts IS NOT NULL ORDER BY open_ts",
             (self.s,),
+        )
+
+    def closed_between(self, start_ms: int, end_ms: int) -> list[dict[str, Any]]:
+        """Trades that *finished* inside the window — a trade belongs to the period it closed in."""
+        return self.db.query(
+            "SELECT * FROM trades WHERE strategy = ? AND close_ts IS NOT NULL AND close_ts >= ?"
+            " AND close_ts < ? ORDER BY close_ts",
+            (self.s, start_ms, end_ms),
         )
 
 

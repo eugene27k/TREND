@@ -383,8 +383,11 @@ class FakeGateway:
         if not self._adl and not self._liquidation:
             return snapshot
         return {
-            s: replace(p, adl_quantile=self._adl.get(s, p.adl_quantile),
-                       liquidation_price=self._liquidation.get(s, p.liquidation_price))
+            s: replace(
+                p,
+                adl_quantile=self._adl.get(s, p.adl_quantile),
+                liquidation_price=self._liquidation.get(s, p.liquidation_price),
+            )
             for s, p in snapshot.items()
         }
 

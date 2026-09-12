@@ -42,6 +42,18 @@ _NAN = float("nan")
 _FLAT_REL_EPS = 1e-12
 
 
+def _response(z: np.ndarray, norm: float) -> np.ndarray:
+    """Vectorised ``z * exp(-z^2 / 4) / norm`` — the *only* implementation.
+
+    ``_intermediates`` and :func:`response` share it so that the blow-off
+    protection the property tests exercise is the arithmetic that sizes
+    positions. A runaway ``z`` overflows to ``exp(-inf) = 0`` and therefore to
+    ``u = 0``; a non-finite ``z`` stays NaN and the bar is not warm.
+    """
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        return z * np.exp(-(z**2) / 4.0) / norm
+
+
 def response(z: float, norm: float = 0.89) -> float:
     """Blow-off-protected response ``z * exp(-z^2 / 4) / norm`` (Section 5.3).
 
@@ -52,7 +64,7 @@ def response(z: float, norm: float = 0.89) -> float:
         raise ConfigError(f"signal.response_norm must be > 0, got {norm}")
     if not math.isfinite(z):
         return _NAN
-    return z * math.exp(-(z**2) / 4.0) / norm
+    return float(_response(np.asarray(float(z)), norm))
 
 
 def rolling_std(values: Sequence[float] | np.ndarray, window: int, ddof: int = 1) -> np.ndarray:
@@ -81,12 +93,18 @@ def rolling_std(values: Sequence[float] | np.ndarray, window: int, ddof: int = 1
 
 
 def _as_prices(prices: Sequence[float] | pd.Series) -> np.ndarray:
-    if isinstance(prices, pd.Series):
-        return prices.to_numpy(dtype=float, copy=True)
-    try:
-        return np.asarray(prices, dtype=float).ravel()
-    except (TypeError, ValueError) as exc:  # non-numeric input is a programming error
+    try:  # non-numeric input is a programming error, and it is ours to name
+        arr = (
+            prices.to_numpy(dtype=float, copy=True)
+            if isinstance(prices, pd.Series)
+            else np.asarray(prices, dtype=float)
+        )
+    except (TypeError, ValueError) as exc:
         raise ConfigError(f"prices must be numeric, got {type(prices).__name__}") from exc
+    if arr.ndim > 1:
+        # Flattening a matrix would silently invent a price history out of columns.
+        raise ConfigError(f"prices must be a single series, got shape {arr.shape}")
+    return arr.ravel()
 
 
 def _ema(prices: np.ndarray, span: int) -> np.ndarray:
@@ -109,6 +127,11 @@ def _safe_div(num: np.ndarray, den: np.ndarray) -> np.ndarray:
 def _validate(params: SignalConfig) -> None:
     if not params.pairs:
         raise ConfigError("signal.pairs must not be empty")
+    for short, long in params.pairs:
+        if short < 1 or long < 1:
+            raise ConfigError(f"signal pair {(short, long)}: EMA spans must be >= 1")
+        if short >= long:
+            raise ConfigError(f"signal pair {(short, long)}: short span must be < long span")
     if params.price_std_window < 2 or params.y_std_window < 2:
         raise ConfigError("signal std windows must be >= 2 for a ddof=1 sample std")
     if params.response_norm <= 0:
@@ -136,8 +159,7 @@ def _intermediates(
         x[k] = _ema(prices, short) - _ema(prices, long)
         y[k] = _safe_div(x[k], price_sd)
         z[k] = _safe_div(y[k], rolling_std(y[k], params.y_std_window, params.ddof))
-        with np.errstate(over="ignore", under="ignore"):
-            u[k] = z[k] * np.exp(-(z[k] ** 2) / 4.0) / params.response_norm
+        u[k] = _response(z[k], params.response_norm)
     return x, y, z, u
 
 
@@ -233,24 +255,26 @@ def compute_signal_series(
 def signal_snapshot_row(result: SignalResult, params: SignalConfig, **extra: Any) -> dict[str, Any]:
     """Flatten a result for the ``signal_snapshots`` table (US-T04 AC 4).
 
+    The keys are the table's own column names (PRD Section 9 / ``002_trend.sql``:
+    ``day``, ``symbol``, ``x1..x3``, ``y1..y3``, ``z1..z3``, ``u1..u3``,
+    ``signal``, ``warm``, ``bar_ts``), so the row can be written as it stands.
     Storage owns the write; the engine only names the columns so that the pure
-    layer stays free of the database.
+    layer stays free of the database. ``extra`` may add columns but never
+    overwrite a computed one — every number in the row comes from ``result``.
     """
     row: dict[str, Any] = {
         "symbol": result.symbol,
-        "bar_day": result.bar_day.isoformat() if result.bar_day else None,
-        "bar_ts_ms": result.bar_ts_ms,
+        "day": result.bar_day.isoformat() if result.bar_day else None,
+        "bar_ts": result.bar_ts_ms,
         "signal": result.signal,
         "warm": result.warm,
     }
-    for k, (short, long) in enumerate(params.pairs):
-        tag = f"{short}_{long}"
-        row[f"x_{tag}"] = result.x[k]
-        row[f"y_{tag}"] = result.y[k]
-        row[f"z_{tag}"] = result.z[k]
-        row[f"u_{tag}"] = result.u[k]
-    row.update(extra)
-    return row
+    for k in range(len(params.pairs)):
+        row[f"x{k + 1}"] = result.x[k]
+        row[f"y{k + 1}"] = result.y[k]
+        row[f"z{k + 1}"] = result.z[k]
+        row[f"u{k + 1}"] = result.u[k]
+    return {**extra, **row}
 
 
 __all__ = [
