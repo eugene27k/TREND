@@ -162,6 +162,83 @@ def test_symbols_inside_a_wave_are_worked_concurrently(
     assert first_taker >= 2, "no symbol may escalate before every symbol has been quoted"
 
 
+def test_us_t09_ac4_a_resumed_entry_does_not_overwrite_its_own_earlier_slices(
+    ctx: Context, venue: FakeGateway, repos: Repositories, clock: FakeClock
+) -> None:
+    """The interrupted run's slice rows are history, not scratch space (US-T10 AC 1).
+
+    Slice ids are ``rebalance_id:symbol:n`` and the row is written with INSERT OR
+    REPLACE, so an entry that replays from its first slice would silently erase
+    what the first attempt recorded — and the lifecycle, the maker flags and the
+    filled quantities would stop adding up to what was actually traded.
+    """
+
+    def die_after_one(gateway: FakeGateway, order) -> None:
+        fill_hook()(gateway, order)
+        gateway.inject_error("place_order", ExchangeUnreachable("process died"))
+
+    venue.set_fill_policy("callable", die_after_one)
+    with pytest.raises(ExchangeUnreachable):
+        RebalanceExecutor(ctx).execute(
+            "reb-1",
+            [buy(BTC, 3.0, 100.0, n_slices=3)],
+            decision_mids=mids(),
+            end_ts_ms=clock.now_ms() + HOUR_MS,
+        )
+    before = {r["slice_id"]: r["fill_qty"] for r in repos.slices.for_rebalance("reb-1")}
+    assert before["reb-1:BTCUSDT:0"] == pytest.approx(1.0)  # 3.0 over three slices
+    assert repos.rebalances.get("reb-1")["cursor"] == 0
+
+    venue.clear_errors()
+    venue.set_fill_policy("callable", fill_hook())
+    RebalanceExecutor(ctx).resume("reb-1", clock.now_ms() + HOUR_MS)
+
+    rows = {r["slice_id"]: r["fill_qty"] for r in repos.slices.for_rebalance("reb-1")}
+    assert set(before) < set(rows), "the interrupted run's rows must survive"
+    assert rows["reb-1:BTCUSDT:0"] == pytest.approx(1.0)
+    # The decisive property: the slice ledger accounts for every unit traded.
+    assert sum(rows.values()) == pytest.approx(venue.positions()[BTC].qty) == pytest.approx(3.0)
+
+
+def test_us_t10_ac1_both_legs_of_a_flip_keep_their_own_slice_rows(
+    ctx: Context, venue: FakeGateway, repos: Repositories, clock: FakeClock
+) -> None:
+    """A flip is two plan entries on one symbol inside one rebalance (US-T10 AC 2).
+
+    Both used to number their slices from zero, so the opening leg overwrote the
+    closing leg row for row and the ``slices`` table reported half the traded
+    quantity.
+    """
+    venue.set_position(BTC, 10.0, 100.0)
+    venue.set_fill_policy("callable", fill_hook())
+    plan = [
+        close(BTC, 10.0, 100.0, seq=0),
+        PlannedOrder(
+            symbol=BTC,
+            side=Side.SELL,
+            delta_notional=-1_000.0,
+            delta_qty=-10.0,
+            current_qty=0.0,
+            target_qty=-10.0,
+            reduce_only=False,
+            risk_reducing=False,
+            sequence=1,
+            n_slices=1,
+        ),
+    ]
+
+    RebalanceExecutor(ctx).execute("reb-1", plan, decision_mids=mids(), end_ts_ms=clock.now_ms() + HOUR_MS)
+
+    rows = repos.slices.for_rebalance("reb-1")
+    assert len(rows) == 2, "one row per leg"
+    assert len({r["slice_id"] for r in rows}) == 2
+    assert sorted(r["reduce_only"] for r in rows) == [0, 1]
+    # +10 closed and 10 sold short is 20 units of trading, and every one of them
+    # is on a slice row.
+    assert sum(r["fill_qty"] for r in rows) == pytest.approx(20.0)
+    assert venue.positions()[BTC].qty == pytest.approx(-10.0)
+
+
 def test_resume_of_an_unknown_rebalance_raises(ctx: Context) -> None:
     from aegis.core.errors import AegisError
 
@@ -408,6 +485,31 @@ def test_us_t10_ac5_window_end_cancels_orders_and_logs_residuals(
 # --------------------------------------------------------------------------- #
 # 5.9 step 6 — illiquid symbols
 # --------------------------------------------------------------------------- #
+
+
+def test_us_t10_ac5_a_position_we_failed_to_close_is_a_residual_however_small(
+    ctx: Context, venue: FakeGateway, repos: Repositories, clock: FakeClock
+) -> None:
+    """There is no tolerance band around "closed" (5.9 step 6, US-T10 AC 5).
+
+    A 20 USDT leftover sits inside ``0.0025 * E`` = 25, so the band that keeps
+    small *deltas* out of the plan used to hide it here too: the run reported no
+    residuals at all while the position it had been told to close was still open,
+    and the day never counted towards the illiquid streak.
+    """
+    venue.set_position(BTC, 0.2, 100.0)  # 20 USDT against E = 10 000
+    venue.set_fill_policy("none")
+
+    outcome = RebalanceExecutor(ctx).execute(
+        "reb-1", [close(BTC, 0.2, 100.0)], decision_mids=mids(), end_ts_ms=clock.now_ms() + 60_000
+    )
+
+    assert outcome.status is RebalanceStatus.WINDOW_END
+    assert [(r["symbol"], r["reason"]) for r in outcome.residuals] == [(BTC, "window_end")]
+    assert outcome.residuals[0]["residual_qty"] == pytest.approx(-0.2)
+    assert venue.positions()[BTC].qty == pytest.approx(0.2)  # still open, hence a residual
+    today = day_of(clock.now_ms()).isoformat()
+    assert repos.illiquid.consecutive_failures(BTC, [today]) == 1
 
 
 def test_three_consecutive_failures_flag_the_symbol_illiquid(

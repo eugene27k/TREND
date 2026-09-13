@@ -79,7 +79,7 @@ def test_us_t03_ac1_backfill_loads_min_history_days(ctx: Context, bars: BarServi
     assert ctx.gateway.calls["daily_bars"] == 1
 
 
-def test_us_t03_ac1_backfill_skips_symbols_that_already_have_enough_history(
+def test_us_t03_ac1_backfill_skips_a_series_that_is_long_enough_and_current(
     ctx: Context, bars: BarService
 ) -> None:
     seed(ctx, SYMBOL, 420)
@@ -88,6 +88,41 @@ def test_us_t03_ac1_backfill_skips_symbols_that_already_have_enough_history(
     bars.backfill([SYMBOL])
 
     assert ctx.gateway.calls["daily_bars"] == 1
+
+
+def test_us_t03_ac1_backfill_tops_up_a_stale_series(
+    ctx: Context, bars: BarService, clock: FakeClock
+) -> None:
+    # 5.1 step 3 ranks on "the median of the last 30 daily quote volumes", and a
+    # candidate outside the traded universe gets no daily bar of its own: if a
+    # long-but-stale series were skipped, every later month would rank on the
+    # volumes of the first backfill.
+    seed(ctx, SYMBOL, 420)  # ... 2026-09-07
+    bars.backfill([SYMBOL])
+    clock.set(to_ms("2026-10-08T00:02:00Z"))
+    seed(ctx, SYMBOL, 450, end=date(2026, 10, 7))  # the same window plus 30 sessions
+
+    stored = bars.backfill([SYMBOL])
+
+    assert ctx.gateway.calls["daily_bars"] == 2
+    assert stored[SYMBOL] == 450
+    assert ctx.repos.bars.latest_day(SYMBOL) == "2026-10-07"
+    assert bars.closes(SYMBOL)[-1] == 100.0 + 449
+
+
+def test_us_t03_ac1_forward_filled_rows_do_not_pass_for_history(
+    ctx: Context, bars: BarService
+) -> None:
+    # AC 2's placeholders are invisible to the selector's history gate, so they
+    # must not make backfill believe the venue has already been asked.
+    seed(ctx, SYMBOL, 3, end=LAST_CLOSED - timedelta(days=2))
+    bars.backfill([SYMBOL], min_days=3)
+    bars.forward_fill([SYMBOL], through=LAST_CLOSED)
+    assert ctx.repos.bars.count(SYMBOL) == 5
+    calls = ctx.gateway.calls["daily_bars"]
+
+    assert bars.backfill([SYMBOL], min_days=5) == {SYMBOL: 3}
+    assert ctx.gateway.calls["daily_bars"] == calls + 1
 
 
 def test_us_t03_ac1_ensure_day_retries_until_the_bar_arrives(

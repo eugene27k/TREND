@@ -74,6 +74,35 @@ def test_us_t09_ac4_a_new_process_resumes_the_persisted_plan(world):
     assert report.state == str(EngineState.IDLE)
 
 
+def test_invariant1_a_block_stops_a_resume_from_growing_the_book(world):
+    """A stored plan carries risk-increasing legs; a block forbids sending them.
+
+    The plan was sized before the process died. If a kill rule, a reconciliation
+    break or an operator pause has raised a block in the meantime, replaying it
+    would be the engine growing exposure while only reductions are allowed
+    (Invariant 1 / Section 12). The deltas roll into the next rebalance instead,
+    which the hysteresis makes harmless (Locked Decision 7).
+    """
+    rebalance_id = _interrupted_rebalance(world)
+    traded_before = world.repos.rebalances.get(rebalance_id)["traded_notional"]
+
+    world.gateway.clear_errors()
+    world.gateway.set_fill_policy("immediate")
+    world.clock.set(to_ms("2026-09-08T00:20:00Z"))
+
+    blocked = TrendRunner(world)
+    blocked.machine.load()
+    blocked.machine.block("reconciliation_break")
+
+    report = blocked.start(world.clock.now_ms())
+
+    assert f"abandoned:{rebalance_id}" in report.actions
+    assert f"resumed:{rebalance_id}" not in report.actions
+    after = world.repos.rebalances.get(rebalance_id)
+    assert after["status"] == "window_end"
+    assert after["traded_notional"] == traded_before, "nothing more may be sent"
+
+
 def test_the_resumed_rebalance_never_overshoots_a_target(world):
     """The decisive property: replaying must not push a position past its target."""
     rebalance_id = _interrupted_rebalance(world)

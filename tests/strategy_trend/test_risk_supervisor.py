@@ -274,3 +274,67 @@ def test_bnb_check_survives_a_gateway_failure(book, ctx):
     sup = book({"BTCUSDT": 1_000.0})
     ctx.gateway.inject_error("bnb_balance", ExchangeUnreachable("down"))
     assert sup.check_bnb_balance(ctx.clock.now_ms()) is None
+
+
+# --------------------------------------------------------------------------- #
+# Section 12 cadences — the ladder must run at its configured rate
+# --------------------------------------------------------------------------- #
+
+
+def test_the_red_margin_ladder_reduces_25_pct_per_five_minutes_not_per_tick(ctx, book):
+    """'reduce every position by 25 % per 5 minutes' means per five minutes.
+
+    On the 60 s supervisor tick an unrated ladder would cut three quarters of the
+    book in three minutes and pay the spread four times over.
+    """
+    from aegis.strategy_trend.runner import TrendRunner
+
+    book({"BTCUSDT": 1_000.0}, maint=4_000.0)  # margin ratio 40 % -> RED
+    runner = TrendRunner(ctx)
+    runner.start(ctx.clock.now_ms())
+
+    fired = []
+    runner.executor.reduce_by = lambda fractions, reason, now_ms: fired.append(reason)
+
+    for _ in range(4):  # four 60 s ticks
+        report = runner.tick(ctx.clock.now_ms())
+        assert report is not None
+        ctx.clock.advance(seconds=60)
+    assert len(fired) == 1, f"the ladder ran {len(fired)} times inside five minutes"
+
+    ctx.clock.advance(seconds=120)  # now past 5 minutes
+    runner.tick(ctx.clock.now_ms())
+    assert len(fired) == 2
+
+
+def test_adl_is_checked_on_its_own_five_minute_cadence(ctx, book):
+    from aegis.strategy_trend.runner import TrendRunner
+
+    book({"BTCUSDT": -1_000.0}, adl={"BTCUSDT": 5})
+    runner = TrendRunner(ctx)
+    runner.start(ctx.clock.now_ms())
+    fired = []
+    runner.executor.reduce_by = lambda fractions, reason, now_ms: fired.append(reason)
+
+    for _ in range(4):
+        runner.tick(ctx.clock.now_ms())
+        ctx.clock.advance(seconds=60)
+    assert len(fired) == 1
+
+    ctx.clock.advance(seconds=120)
+    runner.tick(ctx.clock.now_ms())
+    assert len(fired) == 2
+
+
+def test_a_cap_breach_is_trimmed_on_the_very_next_tick(ctx, book):
+    """Caps are not rate-limited: Section 12 says 'reduce excess within 15 min'."""
+    from aegis.strategy_trend.runner import TrendRunner
+
+    book({"BTCUSDT": 4_000.0})  # 0.40x on a 0.25x cap
+    runner = TrendRunner(ctx)
+    runner.start(ctx.clock.now_ms())
+    fired = []
+    runner.executor.reduce_by = lambda fractions, reason, now_ms: fired.append(reason)
+
+    runner.tick(ctx.clock.now_ms())
+    assert fired == ["cap_breach"]

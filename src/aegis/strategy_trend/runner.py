@@ -33,7 +33,7 @@ from aegis.bars.service import BarService
 from aegis.core.clock import at_utc, day_of, month_key
 from aegis.core.context import Context
 from aegis.core.errors import AegisError, ExchangeUnreachable, GatewayError, RateLimited
-from aegis.core.types import EngineState, Phase, Severity
+from aegis.core.types import EngineState, Phase, RiskStatus, Severity
 from aegis.ops.controls import Controls
 from aegis.portfolio.governor import governor, is_downward
 from aegis.portfolio.sizing import size_targets
@@ -282,8 +282,18 @@ class TrendRunner:
             self.schedule.mark(sch.SUPERVISOR, now_ms)
             snapshot = self.supervisor.check(now_ms)
             positions = self.ctx.gateway.positions()
+            # A cap breach is trimmed as soon as it is seen (Section 12: "within
+            # 15 min"). The red-margin ladder is rate-limited to its configured
+            # cadence instead: "reduce every position by 25 % per 5 minutes" means
+            # per five minutes, and running it on the 60 s tick would cut three
+            # quarters of the book in three and pay the spread four times over.
             cuts = self.supervisor.reductions(snapshot, positions)
-            cuts += self.supervisor.adl_reductions(positions)
+            if snapshot.status is RiskStatus.RED and not self._interval_elapsed(
+                "red_reduce", now_ms, self.ctx.cfg.risk.red_reduce_interval_s
+            ):
+                cuts = []
+            if self._interval_elapsed("adl", now_ms, self.ctx.cfg.risk.adl_check_interval_s):
+                cuts += self.supervisor.adl_reductions(positions)
             if cuts:
                 self._risk_cut(
                     {c.symbol: c.fraction for c in cuts}, reason=cuts[0].reason, now_ms=now_ms, report=report
@@ -561,6 +571,21 @@ class TrendRunner:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def _interval_elapsed(self, name: str, now_ms: int, seconds: float) -> bool:
+        """True the first time, then only once ``seconds`` have passed.
+
+        Marking is a side effect, so a caller that asks has consumed the slot.
+        The stamp lives in the engine state so a restart does not reset a rate
+        limit into firing immediately.
+        """
+        key = f"last_{name}_ms"
+        last = self.machine.state.context.get(key)
+        if last is not None and now_ms - int(last) < seconds * 1000:
+            return False
+        self.machine.state.context[key] = now_ms
+        self.machine.save()
+        return True
 
     def _window_end_ms(self, now_ms: int) -> int:
         return at_utc(day_of(now_ms), self.ctx.cfg.rebalance.end_utc)
