@@ -1,8 +1,10 @@
 # PRD coverage — an audit, not a claim
 
 **Audited commit:** `97c3311` (2026-09-13 00:25:02 UTC), plus ~26 uncommitted working-tree
-files. **Audited by:** a separate read-only pass over the PRD, the source and the tests —
-no code was changed.
+files — those files were committed as `a7c76f5` while the second pass below was running, so
+**the content audited here is `a7c76f5`**, not a dirty `97c3311`.
+**Audited by:** a separate read-only pass over the PRD, the source and the tests, then a second
+adversarial pass over that audit — no code was changed by either.
 
 **Verification runs used as evidence (all offline, on this machine):**
 
@@ -23,6 +25,34 @@ no code was changed.
 > An earlier coverage measurement was corrupted by source files changing during the run. Every
 > number in this document was re-taken at or after `97c3311`, but an operator should re-run the
 > table above on a quiet tree before relying on it.
+
+> **Second pass, same commit.** This document was afterwards re-checked line by line against the
+> code and the tests at `97c3311` **plus the working-tree files the first pass audited**
+> (committed as `a7c76f5` partway through, with no change to the content measured — the only
+> dirty file afterwards is this document): the suite is green (1357 collected, exit 0), `ruff` is clean, `mypy` still reports 31
+> errors in 8 files, `npx tsc -b --noEmit` in `ui/` is clean, and `data.binance.vision` is still
+> refused by the proxy (`CONNECT tunnel failed, response 403`). The §14 coverage floor was re-measured too: **96 %** over the six packages, lowest file 92 % (`backtest_trend/archive.py`, `simulator.py`, `tracking.py`). The 82 rows below were confirmed
+> against the PRD's own per-story counts as `tools/self_report.py` hard-codes them
+> (4/4/4/5/3/4/2/4/4/6/4/5/4/4/3/6/4/8/4 = 82) — every criterion appears exactly once. Every
+> `(N)` in the Proof column was re-derived from the suite. What changed:
+>
+> * **US-T12 AC 2 and AC 4** — the first draft said the 5-minute cadences were unasserted and
+>   that the engine cut on every 60 s tick. Both were made false by `c51ab48`, which landed
+>   mid-audit: `runner.py::_risk_path` rate-limits the red ladder and the ADL check, and three
+>   runner-level tests prove it. Corrected.
+> * **"What is NOT done" item 6** — the first draft said Locked Decision 1 was "not enforced
+>   anywhere" and that `set_leverage`/`set_margin_type` had no caller. `ad88430`, also mid-audit,
+>   gave them one. Two of the five keys are now applied and tested; three remain operator
+>   prerequisites. Corrected.
+> * **US-T15 AC 2** — 35 documented metric names, not 36 (35 + 11 extra = 46).
+> * **US-T12 AC 1** (7 named tests, not 6), **US-T16 AC 1** (19, not 12), **US-T16 AC 5** (9, not
+>   8), **US-T18 AC 8** (3, not 2).
+> * **US-T16 AC 1 and AC 3, US-T19 AC 2** — gaps the first pass missed, now stated in the rows
+>   and as **D6** and **D7**.
+> * **D2** — seven of the nine `executor.py` mypy errors are `yield from` artefacts; the other
+>   two are something else.
+>
+> No status in the scoreboard changed: 63 / 18 / 0 / 1 still holds.
 
 ---
 
@@ -69,6 +99,8 @@ document opened the test.
 ---
 
 ## EPIC A — Foundation and data
+
+> **How to read the Proof column.** Unless a row says otherwise, a `(N)` is the number of test *functions named for that criterion* — what `grep -c "def test_us_tNN_acM" tests/` returns — not the number of tests in the file, and not the collected count, which is higher because parametrised functions expand. A few rows instead cite a whole file's function count and say so (`test_startup.py` (16 tests), `test_paper.py` (50 tests), `test_archive.py` (19)). Every count in this document was re-derived on the second pass.
 
 | Criterion | Status | Code | Proof | Note |
 |---|---|---|---|---|
@@ -131,10 +163,10 @@ document opened the test.
 
 | Criterion | Status | Code | Proof | Note |
 |---|---|---|---|---|
-| **T12.1** every 60 s: gross, net, largest, margin ratio, available; green / amber / red | IMPLEMENTED + TESTED | `src/aegis/strategy_trend/risk_supervisor.py::check`; `scheduler.py::SUPERVISOR` | `tests/strategy_trend/test_risk_supervisor.py` `us_t12_ac1` (6) — one per cap and both margin bands | |
-| **T12.2** amber-on-cap → reduce the excess within 15 min; red → 25 % per 5 min | IMPLEMENTED + TESTED | `risk_supervisor.py::reductions`; `runner.py::_risk_path` issues the cut on the same 60 s tick | `tests/strategy_trend/test_risk_supervisor.py` `us_t12_ac2` (7) — exact trim fractions for single, gross and net breaches, and 25 % on red | The **amounts** are asserted; the **cadence** is not. In practice the engine reduces on the 60 s tick, i.e. sooner than "within 15 minutes" and more often than "per 5 minutes" — stricter than the PRD, but not what the PRD literally describes |
+| **T12.1** every 60 s: gross, net, largest, margin ratio, available; green / amber / red | IMPLEMENTED + TESTED | `src/aegis/strategy_trend/risk_supervisor.py::check`; `scheduler.py::SUPERVISOR` | `tests/strategy_trend/test_risk_supervisor.py` `us_t12_ac1` (7) — one per cap and both margin bands | |
+| **T12.2** amber-on-cap → reduce the excess within 15 min; red → 25 % per 5 min | IMPLEMENTED + TESTED | `risk_supervisor.py::reductions`; `runner.py::_risk_path` — a cap breach is trimmed on the tick that sees it (inside 15 min), the red ladder is rate-limited to `risk.red_reduce_interval_s` (300 s) | Amounts: `tests/strategy_trend/test_risk_supervisor.py` `us_t12_ac2` (7) — exact trim fractions for single, gross and net breaches, and 25 % on red. Cadence: `…::test_the_red_margin_ladder_reduces_25_pct_per_five_minutes_not_per_tick` and `…::test_a_cap_breach_is_trimmed_on_the_very_next_tick` drive the real `TrendRunner` over four 60 s ticks and count the cuts | Both halves are asserted. The cadence tests are not named for this AC, so `tools/self_report.py` does not see them; the rate limit lives in the engine state, so a restart cannot reset it into firing immediately |
 | **T12.3** survivable-downtime rule; reports the survivable move and blocks breaching rebalances | IMPLEMENTED + TESTED | `risk_supervisor.py::survivable_move/survives_downtime/would_breach_downtime_rule` | `tests/strategy_trend/test_risk_supervisor.py` `us_t12_ac3` (6), incl. the PRD's "book at net 1.5 E" case | Honest test: at the net cap the rule *cannot* fire, and the test says so. Note `risk.max_expected_downtime_h` (12) never enters the arithmetic — the shock is applied instantaneously; the hours are documentation |
-| **T12.4** ADL quantile ≥ 4 on a short → reduce 25 % | IMPLEMENTED + TESTED | `risk_supervisor.py::adl_reductions` | `tests/strategy_trend/test_risk_supervisor.py::test_us_t12_ac4_short_at_adl_quantile_4_is_reduced_25_pct`, `…longs_and_low_quantiles_are_left_alone` | |
+| **T12.4** ADL quantile ≥ 4 on a short → reduce 25 % | IMPLEMENTED + TESTED | `risk_supervisor.py::adl_reductions` | `tests/strategy_trend/test_risk_supervisor.py::test_us_t12_ac4_short_at_adl_quantile_4_is_reduced_25_pct`, `…longs_and_low_quantiles_are_left_alone`; the 5-minute cadence by `…::test_adl_is_checked_on_its_own_five_minute_cadence` (runner-level, not named for this AC) | |
 | **T12.5** BNB fee balance check | IMPLEMENTED + TESTED | `risk_supervisor.py::check_bnb_balance` | `tests/strategy_trend/test_risk_supervisor.py::test_us_t12_ac5_bnb_balance_below_the_floor_alerts` | One test |
 | **T13.1** six pre-registered kill rules with the specified responses | IMPLEMENTED + TESTED | `src/aegis/strategy_trend/kill_rules.py` | `tests/strategy_trend/test_kill_rules.py` `us_t13_ac1` (7) — hard halt at 25 % DD *and* the 1.5× backtest-max-DD tightening, daily loss, bootstrap p05, tracking error, rebalance failure, reconciliation break | |
 | **T13.2** safe-mode triggers (exchange unreachable, stream down, clock drift, permission change) with reduce-only | **PARTIAL** | `runner.py::tick` (catches `GatewayError` → `machine.enter_safe_mode`), `machine.py` | `tests/integration/test_acceptance.py::test_us_t13_ac2_an_unreachable_exchange_enters_safe_mode_with_reductions_only`, `…safe_mode_clears_when_the_exchange_returns`; `tests/ops/test_controls.py` | Only the **exchange-unreachable** trigger exists. Clock drift is checked at startup only (`engine/startup.py::check_clock`) and never re-checked while running; a key-permission change is never re-checked at runtime; there is no market-data stream to lose (Appendix B: "stream not required"), which excuses one of the four but not the other two |
@@ -150,13 +182,13 @@ document opened the test.
 | **T14.3** identity: Σ symbol P&L + non-position ledger = equity change − transfers, to 0.01 USDT/day | IMPLEMENTED + TESTED | `attribution.py` (`ATTRIBUTION_IDENTITY_BREAK` alert) | `tests/accounting/test_attribution.py` `us_t14_ac3` (5) — holds on a synthetic day, survives a deposit, and **breaks loudly** when income is missing or an unbooked fill appears | The negative cases are what make this evidence |
 | **T14.4** trade records (open → flat) with holding days, P&L, MAE, entry/exit signal | IMPLEMENTED + TESTED | `attribution.py`; `trades` table | `tests/accounting/test_attribution.py` `us_t14_ac4` (4), incl. idempotent re-run | |
 | **T15.1** Section 10 metrics as pure functions with the Appendix C.4 vectors, stored in `metrics` | IMPLEMENTED + TESTED | `src/aegis/analytics/trend_metrics.py`, `analytics/engine.py` | `tests/analytics/test_trend_metrics.py::test_us_t15_ac1_appendix_c4_turnover_vector`, `…beta_and_correlation_vector` (β 0.3098 ± 0.02, ρ 0.891 ± 0.02) | |
-| **T15.2** the full TREND metric additions for the standard periods | IMPLEMENTED + TESTED | `analytics/engine.py::METRIC_NAMES` (36 documented + 11 extra), `trend_metrics.py` | `tests/analytics/test_trend_metrics.py` + `test_engine.py` (81 tests) | Every Section 10 row has an implementation, including the regime table, governor time-in-state, execution alpha and MAE quantiles. `corr_carry` is implemented and returns `None` — there is no CARRY return series to correlate against |
+| **T15.2** the full TREND metric additions for the standard periods | IMPLEMENTED + TESTED | `analytics/engine.py::METRIC_NAMES` (35 documented + 11 extra = 46), `trend_metrics.py` | `tests/analytics/test_trend_metrics.py` + `test_engine.py` (81 tests) | Every Section 10 row has an implementation, including the regime table, governor time-in-state, execution alpha and MAE quantiles. `corr_carry` is implemented and returns `None` — there is no CARRY return series to correlate against |
 | **T15.3** shared metrics produced by the shared engine unchanged | IMPLEMENTED + TESTED | `src/aegis/analytics/metrics.py` | `tests/analytics/test_metrics.py` + `test_engine.py` (45 tests), incl. Sharpe with standard error, `n_obs`, information ratio vs the backtest reference | |
-| **T16.1** point-in-time universe builder from the Binance public archive, delisted symbols included | IMPLEMENTED + TESTED **(stub only)** | `src/aegis/backtest_trend/archive.py`, `universe_builder.py` | `tests/backtest_trend/test_archive.py` (12 — URL layout, header rows, missing months, caching, corrupt member) and `test_universe_builder.py::test_us_t16_ac1_a_delisted_symbol_is_in_the_universes_of_the_months_it_existed` | Never executed against `data.binance.vision` — see Known limitations |
+| **T16.1** point-in-time universe builder from the Binance public archive, delisted symbols included | IMPLEMENTED + TESTED **(stub only)** | `src/aegis/backtest_trend/archive.py`, `universe_builder.py` | `tests/backtest_trend/test_archive.py` (19 — URL layout, header rows, missing months, caching, corrupt member, and the REST cross-check) and `test_universe_builder.py::test_us_t16_ac1_a_delisted_symbol_is_in_the_universes_of_the_months_it_existed` | Never executed against `data.binance.vision` — see Known limitations. `archive.py::verify_against_rest` (PRD 11.1) compares the archive field by field against the venue's own klines and refuses to continue on a mismatch, but it is wired into the networked `--fetch-archive` pass only, so it too has never run for real |
 | **T16.2** daily simulator reusing `signals`/`riskmodel`/`portfolio`; next-open fills, conservative costs, funding, governor, monthly refresh | IMPLEMENTED + TESTED **(synthetic data)** | `src/aegis/backtest_trend/simulator.py` | `tests/backtest_trend/test_simulator.py` (16), incl. `test_no_look_ahead_a_run_ending_earlier_is_a_prefix` and `test_equity_reconciles_with_cash_and_marked_positions` (PRD §14.2) | The market is `tests/backtest_trend/conftest.py::make_market`, a seeded synthetic series **built with flipping trends in it**. `test_us_t16_ac2_momentum_is_profitable_on_a_trending_market` is therefore a check that the machine captures a trend, not evidence of an edge — the test's own docstring says so |
-| **T16.3** outputs: metrics, equity path, attribution, parameter snapshot, checksums, git commit, robustness, bootstrap | IMPLEMENTED + TESTED | `backtest_trend/runner.py`, `bootstrap.py`, `robustness.py`; `backtest_runs`/`robustness_reports`/`bootstrap_distribution` | `tests/integration/test_acceptance.py::test_us_t16_ac3_a_run_stores_metrics_robustness_bootstrap_and_a_manifest`; `tests/backtest_trend/test_runner.py` (8) | |
+| **T16.3** outputs: metrics, equity path, attribution, parameter snapshot, checksums, git commit, robustness, bootstrap | IMPLEMENTED + TESTED | `backtest_trend/runner.py`, `bootstrap.py`, `robustness.py`; `backtest_runs`/`robustness_reports`/`bootstrap_distribution` | `tests/integration/test_acceptance.py::test_us_t16_ac3_a_run_stores_metrics_robustness_bootstrap_and_a_manifest`; `tests/backtest_trend/test_runner.py` (8); checksums by `tests/backtest_trend/test_simulator.py::test_manifest_carries_checksums_and_the_parameter_snapshot` and `…test_a_changed_bar_changes_the_manifest_checksum` | One element of the list is **unasserted**: `runner.py::git_commit()` runs on every backtest, but every `git_commit` in the suite is a value a test passed *in* to a fixture — nothing reads back what a real `BacktestRunner` stored, so a `git_commit()` that silently returned `"unknown"` on the deployment host would not fail a test |
 | **T16.4** walk-forward is a robustness check only; defaults in the top half on ≥70 % of windows | IMPLEMENTED + TESTED | `backtest_trend/walkforward.py` | `tests/backtest_trend/test_robustness_walkforward.py` (12), incl. the 3×3×3 grid, 12 m/6 m rolling windows, and `test_us_t16_ac4_gate_needs_the_default_in_the_top_half_on_70_pct_of_windows` | The gate *logic* is proved. No walk-forward has ever been run on real data, so the ≥70 % result itself is unknown |
-| **T16.5** the reference run is re-executed daily; TREND tracking bounds | IMPLEMENTED + TESTED | `src/aegis/backtest_trend/tracking.py`; `tracking` table; `kill_rules._tracking_error` | `tests/integration/test_acceptance.py::test_us_t16_ac5_the_reference_is_re_run_daily_and_compared`; `tests/integration/test_tracking.py` (8) | Bounds (0.7 / 3 % / 2.0 / 1.5) are asserted against config |
+| **T16.5** the reference run is re-executed daily; TREND tracking bounds | IMPLEMENTED + TESTED | `src/aegis/backtest_trend/tracking.py`; `tracking` table; `kill_rules._tracking_error` | `tests/integration/test_acceptance.py::test_us_t16_ac5_the_reference_is_re_run_daily_and_compared`; `tests/integration/test_tracking.py` (9) | Bounds (0.7 / 3 % / 2.0 / 1.5) are asserted against config |
 | **T16.6** backtest completes in <15 min for 2021→now (16 symbols) and is deterministic | **PARTIAL** | `simulator.py` | Determinism: `test_us_t16_ac6_the_run_is_deterministic` (identical `run_id`, manifest, metrics, equity) and `…a_different_parameter_changes_the_run_id`. Budget: `test_us_t16_ac6_completes_well_inside_the_15_minute_budget` asserts <120 s and <200 ms/day on a ~470-day, 20-symbol synthetic run | The determinism half is solid. The 15-minute budget is **extrapolated** from a shorter synthetic run on this build machine, not measured over 2021→now on the free VM |
 
 ## EPIC F — Operations, dashboard, deployment
@@ -174,9 +206,9 @@ document opened the test.
 | **T18.5** Attribution: per-symbol/per-side tables, regime table, contribution shares | **PARTIAL** | `api/routes/attribution.py`; `ui/src/pages/Attribution.tsx` | `tests/api/test_pages_seeded.py::test_us_t18_ac5_attribution_covers_periods_shares_and_regimes` | as above |
 | **T18.6** Metrics / Operations / Backtest / Controls with the TREND additions | **PARTIAL** | `api/routes/{metrics,operations,backtest,controls,universe}.py` | `tests/api/test_pages_seeded.py` `us_t18_ac6` (5) — metrics with `n_obs`+SE, operations uptime/recon/alerts/infra, backtest robustness+walk-forward+bootstrap, universe entrants/leavers/illiquid | as above. The Operations page exposes `rss_mb`/`cpu_pct` fields that nothing ever populates — see T19.2 |
 | **T18.7** strategy selector and a combined "All sleeves" overview | **PARTIAL** | `api/routes/overview.py` (`/api/strategies`, combined overview); `ui/src/pages/AllSleeves.tsx` | `tests/api/test_pages_seeded.py::test_us_t18_ac7_strategies_lists_only_deployed_sleeves`, `…combined_overview_shows_each_sleeve_side_by_side`; `tests/api/test_empty_and_unknown.py::test_us_t18_ac7_a_sleeve_that_is_not_deployed_is_absent_not_a_500` | Exercised with a synthetic second database; there is no real CARRY sleeve to show |
-| **T18.8** all pages load from stored data in <1 s on the free VM | **PARTIAL** | — | `tests/api/test_performance.py` `us_t18_ac8` (2) — every page and the rebalance drill-down answer inside the budget on a database seeded with a year of history | Measures the **API response** in-process on the build machine. Not a page load, not a browser, not the free VM |
+| **T18.8** all pages load from stored data in <1 s on the free VM | **PARTIAL** | — | `tests/api/test_performance.py` `us_t18_ac8` (3, the first parametrised over every page) — every page and the rebalance drill-down answer inside the budget on a database seeded with a year of history | Measures the **API response** in-process on the build machine. Not a page load, not a browser, not the free VM |
 | **T19.1** compose gains a `trend` service, second Litestream replica path, second Healthchecks check, `restart: always` | **PARTIAL** | `docker-compose.yml`, `ops/docker/Dockerfile` | `tests/integration/test_acceptance.py::test_us_t19_ac1_compose_runs_both_sleeves_with_their_own_db_check_and_replica`, `…the_metrics_jobs_are_staggered_for_the_single_core` (00:05 vs 01:10) | The `carry` service is a **declared placeholder**: it sits behind a compose profile so `docker compose up -d` never starts it, and the engine refuses `--strategy carry`. The file is right for the day CARRY lands; the host does not today run two sleeves |
-| **T19.2** combined footprint RSS <1 GB and CPU <20 % of one core, **measured and shown in the Operations page** | **NOT IMPLEMENTED** | `api/routes/operations.py` reads metrics named `rss_mb` and `cpu_pct` | `tests/integration/test_acceptance.py::test_us_t19_ac2_the_combined_footprint_is_bounded_below_the_free_shape` sums the **declared** `mem_limit`/`cpus` in `docker-compose.yml` (448 + 320 + 192 = 960 MB) | Nothing anywhere in `src/` ever writes an `rss_mb` or `cpu_pct` metric (`grep -rn "rss_mb\|cpu_pct" src/` returns only the reader and a config default). The page will always show blanks. Declared container limits are a budget, not a measurement |
+| **T19.2** combined footprint RSS <1 GB and CPU <20 % of one core, **measured and shown in the Operations page** | **NOT IMPLEMENTED** | `api/routes/operations.py` reads metrics named `rss_mb` and `cpu_pct` | `tests/integration/test_acceptance.py::test_us_t19_ac2_the_combined_footprint_is_bounded_below_the_free_shape` sums the **declared** `mem_limit` in `docker-compose.yml` (448 + 320 + 192 = 960 MB) and asserts each service's `cpus` is `<= 1.0` | Nothing anywhere in `src/` ever writes an `rss_mb` or `cpu_pct` metric (`grep -rn "rss_mb\|cpu_pct" src/` returns only the reader and a config default). The page will always show blanks. Declared container limits are a budget, not a measurement — and the CPU half of the test is weaker still: the declared `cpus` are 0.8 + 0.8 + 0.3 = 1.9 cores and the assertion is `<= 1.0` **per service**, i.e. five whole cores' worth of headroom against a criterion of "< 20 % of one core". That assertion cannot fail |
 | **T19.3** cost inventory lists both strategies; the daily report states the total; `infra.monthly_cost_eur` split by config | **PARTIAL** | `core/config.py::infra`, `reports.py::_infra_mtd` | `tests/integration/test_acceptance.py::test_us_t19_ac3_the_cost_inventory_is_zero_and_split_by_config`; the daily report's infra line is asserted in `tests/ops/test_reports.py::test_us_t17_ac4_daily_body_matches_appendix_d_line_by_line` | The config default is 0 and the compose file does not override it. "Lists both strategies" cannot be shown without CARRY |
 | **T19.4** restore test extended to both databases | IMPLEMENTED + TESTED | `ops/backup.py`, `engine/cli.py::cmd_verify_restore` | `tests/integration/test_acceptance.py::test_us_t19_ac4_the_restore_drill_covers_both_databases`; `tests/ops/test_backup.py::test_us_t19_ac4_each_database_is_restored_from_its_own_replica`, `…a_host_without_litestream_reports_unavailable_rather_than_failing`; `tests/integration/test_cli.py::test_us_t19_ac4_verify_restore_compares_row_counts` | |
 
@@ -218,15 +250,24 @@ Plainly, with what each would take.
    re-checked. *To close:* move `check_clock` and `check_key_permissions` onto the supervisor
    schedule and route their failures into `machine.enter_safe_mode`.
 
-6. **Locked Decision 1 is not enforced anywhere.** `config/trend.yaml` declares
+6. **Locked Decision 1 is enforced for two of its five keys.** `config/trend.yaml` declares
    `leverage: 5`, `margin_type: CROSSED`, `position_mode_one_way: true`,
-   `multi_assets_mode: false`, `bnb_fee_discount: true`. Nothing reads those five keys — the
-   gateway has `set_leverage` and `set_margin_type` but no caller, and startup does not assert
-   the venue's actual settings. `docs/RUNBOOK.md` step 2 makes it a manual operator task. An
-   operator who forgets to switch off multi-assets mode, or leaves hedge mode on, will get no
-   warning from the engine. *To close:* read the account's configuration at startup and refuse
-   to start on a mismatch (assert, do not silently set — silently setting would be the software
-   changing risk parameters on its own).
+   `multi_assets_mode: false`, `bnb_fee_discount: true`. The first two are applied to every
+   universe symbol by `runner.py::apply_account_settings` — at `start()` and again after a
+   universe refresh, since entrants have never been configured — and only when
+   `mode.sends_real_orders`; a symbol the venue refuses raises `ACCOUNT_SETTINGS` and is skipped
+   rather than being fatal. Three tests in `tests/integration/test_acceptance.py`
+   (`test_locked_decision_1_leverage_and_margin_are_applied_to_every_symbol`,
+   `test_paper_mode_configures_nothing_at_the_venue`,
+   `test_a_venue_that_refuses_a_setting_warns_and_carries_on`) prove it. The remaining three —
+   one-way position mode, multi-assets off, BNB fee discount — are account-wide, are not exposed
+   by the futures API in a form the engine can set safely, and are **neither set nor asserted**:
+   `docs/RUNBOOK.md` step 2 makes them a manual operator task, so an operator who forgets to
+   switch off multi-assets mode, or leaves hedge mode on, gets no warning from the engine.
+   *To close:* read those three back at startup and refuse to start on a mismatch (assert, do
+   not silently set — silently setting would be the software changing risk parameters on its
+   own). Note this bullet said "not enforced anywhere" in the first draft of this audit; that
+   was true of `4a9cbbe` and was made false by `ad88430`, which landed mid-audit.
 
 7. **The upward half of the governor's timing is unasserted (US-T08 AC 2).** Nothing tests that
    a restore from 0.5 to 1.0 waits for the next rebalance rather than acting immediately.
@@ -260,7 +301,9 @@ These are properties of the build environment or of the PRD's own design, not de
   `s_max = 3.0` clip binds on a diversified book, so the portfolio runs at roughly 0.67× the
   target — inside the PRD's own 0.5×–1.5× adherence band, and visible in Appendix C.3 itself
   (`s = min(0.20/0.011004, 3.0)`). Specified behaviour, and the first thing that looks wrong on
-  the dashboard. `docs/BACKTEST.md` documents it.
+  the dashboard. `docs/BACKTEST.md` documents it. Note that the "0.67×" (≈13 % realised) is a
+  reading off the same seeded synthetic market as everything else in this repository; that the
+  clip binds is arithmetic and certain, but the ratio it lands at on real data is not known.
 
 * **The `rebalance_midday` robustness variant is an approximation.** Daily bars cannot express a
   12:00 UTC rebalance, so the variant fills at the same day's close instead of the next open.
@@ -305,8 +348,11 @@ functions annotated `Mapping[str, float]` and then multiplies by it
 (`simulator.py:231–232: Unsupported operand types for * ("float" and "None")`), which would be a
 real `TypeError` if a mark were ever missing on a day with a position — the tests never produce
 that input. `backtest_trend/tracking.py:154–155` types `previous` as `str` and then subscripts it
-with `"breach_days"`. The nine in `executor.py` are `yield from` generator-return artefacts and
-appear benign. Recommend fixing the `simulator.py` and `tracking.py` groups before trusting the
+with `"breach_days"`. Of the nine in `executor.py`, seven (lines 440, 451, 536, 540, 563, 590,
+602) are `yield from` generator-return artefacts and two (968–969) are `int()` calls over JSON
+plan rows whose `type: ignore` codes do not match the error mypy actually emits
+(`call-overload`, not `arg-type`); all nine appear benign. Recommend fixing the `simulator.py`
+and `tracking.py` groups before trusting the
 backtest on real (gappy) archive data, where missing marks are exactly what will happen.
 
 **D3 — US-T08 AC 2's named tests do not test the criterion.**
@@ -329,8 +375,26 @@ compose file itself is honest about this in a comment.
 `tests/api/test_deps.py::test_read_only_database_refuses_to_migrate` failed; it passes in
 isolation, passes with `tests/api`, and passes in every subsequent full run. This coincided with
 another session editing the tree, so the most likely explanation is a mid-edit source file rather
-than an order dependency — but it is recorded here because an unexplained failure in this suite is
-worth a second look. Re-run the suite a few times on a quiet tree to rule it out.
+than an order dependency — and the suite installs no `pytest-randomly` and sets no random seed
+(`pyproject.toml` `addopts = "-q --strict-markers"`), so collection order is fixed and a genuine
+order dependency would reproduce on **every** run, not one. It is recorded anyway because an
+unexplained failure in this suite is worth a second look. Re-run the suite a few times on a quiet
+tree to rule it out.
+
+**D6 — the CPU half of the US-T19 AC 2 test cannot fail.**
+`test_us_t19_ac2_the_combined_footprint_is_bounded_below_the_free_shape` checks
+`services[s]["cpus"] <= 1.0` for each of the three services. The compose file declares 0.8, 0.8
+and 0.3, so the assertion holds with roughly five cores of slack against a criterion of "CPU
+< 20 % of one core". Same species as D4: a green assertion that carries no information. It should
+be deleted along with the memory sum once a real sampler exists (D1).
+
+**D7 — nothing reads back the backtest's `git_commit`.** `backtest_trend/runner.py::git_commit()`
+is called on every run and stored, but every `git_commit` in the test suite is a literal a test
+handed *to* a fixture (`"abc"`, `"deadbee"`, `"abc123"`). No test runs a `BacktestRunner` and
+asserts the stored commit is this repository's. "Which code produced this backtest" is the
+question the manifest exists to answer, and on a deployment host where `git` is absent or the
+checkout is shallow, a silent `"unknown"` would pass the suite. *To close:* one assertion in
+`tests/backtest_trend/test_runner.py::test_the_run_persists_everything_under_one_run_id`.
 
 ---
 
