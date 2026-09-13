@@ -101,7 +101,7 @@ def test_invariant1_a_block_stops_a_resume_from_growing_the_book(world):
     report = blocked.start(world.clock.now_ms())
 
     assert f"resumed:{rebalance_id}" in report.actions
-    sent = [r for r in world.gateway.placed[sent_before:]]
+    sent = list(world.gateway.placed[sent_before:])
     assert all(r.reduce_only for r in sent), (
         f"only reduce-only orders may go out while blocked, got "
         f"{[(r.symbol, r.reduce_only) for r in sent]}"
