@@ -38,7 +38,7 @@ from aegis.ops.controls import Controls
 from aegis.portfolio.governor import governor, is_downward
 from aegis.portfolio.sizing import size_targets
 from aegis.rebalance.drift import DriftMonitor
-from aegis.rebalance.executor import RebalanceExecutor
+from aegis.rebalance.executor import KIND_SCHEDULED, RebalanceExecutor
 from aegis.rebalance.planner import build_plan, minute_volume
 from aegis.riskmodel.estimators import build_risk_model
 from aegis.signals.engine import compute_signal
@@ -112,11 +112,18 @@ class TrendRunner:
                 self.machine.state.state = EngineState.REBALANCING
                 self.machine.save()
             end = self._window_end_ms(now)
-            if now < end:
+            # A stored plan carries risk-increasing legs, and a block or a halt
+            # raised while the process was down forbids those (Invariant 1). Risk
+            # cuts are reduce-only by construction and always resume.
+            kind = str(unfinished["kind"] or KIND_SCHEDULED)
+            blocked = kind == KIND_SCHEDULED and not self.machine.state.may_increase_risk()
+            if now < end and not blocked:
                 self.executor.resume(rebalance_id, end)
                 report.note(f"resumed:{rebalance_id}")
             else:
-                # The window has closed; abandon rather than trade against stale targets.
+                # The window has closed, or growth is forbidden; abandon rather
+                # than trade against stale targets. The deltas roll into the next
+                # rebalance, which the hysteresis makes harmless (Locked 7).
                 self.ctx.repos.rebalances.set_status(rebalance_id, "window_end", ended_ts=now)
                 report.note(f"abandoned:{rebalance_id}")
             self.machine.to(EngineState.IDLE)

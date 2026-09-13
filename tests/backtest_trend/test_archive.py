@@ -11,6 +11,7 @@ import pytest
 
 from aegis.backtest_trend.archive import ArchiveFile, ArchiveLoader
 from aegis.core.errors import DataGap
+from aegis.core.types import DailyBar
 
 KLINES = [
     # open_time, open, high, low, close, volume, close_time, quote_volume, ...
@@ -174,8 +175,7 @@ def test_a_corrupt_archive_member_raises_datagap(tmp_path):
 # --------------------------------------------------------------------------- #
 
 
-def _bar(symbol: str, day: date, close: float = 100.0, quote_volume: float = 1_000.0) -> "DailyBar":
-    from aegis.core.types import DailyBar
+def _bar(symbol: str, day: date, close: float = 100.0, quote_volume: float = 1_000.0) -> DailyBar:
 
     return DailyBar(symbol, day, close - 1, close + 1, close - 2, close, 10.0, quote_volume, 0, 0)
 
