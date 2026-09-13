@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 
 from aegis.api.deps import MetricIndex, StrategyDeps, engine_state, get_registry, get_sleeve
+from aegis.ops.reports import BACKUP_LAG_KEY
 from aegis.storage.db import json_loads
 
 router = APIRouter(prefix="/api/{strategy}", tags=["operations"])
@@ -120,6 +121,7 @@ def operations(
     cfg = sleeve.cfg
     now_ms = get_registry(request).now_ms()
     metrics = MetricIndex(repos)
+    state = engine_state(repos, cfg)
 
     beats = repos.heartbeats
     last_beat = beats.last()
@@ -154,13 +156,21 @@ def operations(
         ],
     )
 
+    # Replica lag is measured outside the database, by ``aegis.ops.backup``, and
+    # stashed in ``engine_state.context`` under the key the daily report prints
+    # (``aegis.ops.reports.BACKUP_LAG_KEY``). The dashboard reads that one place
+    # rather than inventing a second source, so page and report cannot disagree.
+    stored_lag = state["context"].get(BACKUP_LAG_KEY)
+    lag_s = float(stored_lag) if isinstance(stored_lag, int | float) else None
     backup_alert = repos.alerts.last_of_code("BACKUP_OK")
     last_backup = int(backup_alert["ts"]) if backup_alert else None
+    if lag_s is None and last_backup is not None:
+        lag_s = (now_ms - last_backup) / 1000.0
     backup = BackupPanel(
         enabled=cfg.backup.enabled,
         replica_path=cfg.backup.litestream_replica_path,
         last_ok_ts=last_backup,
-        lag_s=(now_ms - last_backup) / 1000.0 if last_backup is not None else None,
+        lag_s=lag_s,
         restore_check_days=cfg.backup.restore_check_days,
     )
 
@@ -177,7 +187,7 @@ def operations(
         strategy=str(sleeve.strategy),
         as_of_ts=now_ms,
         mode=str(cfg.mode),
-        state=engine_state(repos, cfg),
+        state=state,
         heartbeat=heartbeat,
         reconciliation=reconciliation,
         backup=backup,

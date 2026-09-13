@@ -278,7 +278,7 @@ def seed(repos: Repositories, *, days: int = 40, symbols: tuple[str, ...] = SYMB
     # --- governor, attribution, trades ------------------------------------- #
     repos.governor.record(day_start_ms(TODAY - timedelta(days=5)), 0.13, 1.0, 0.5, "down", True)
     repos.governor.record(day_start_ms(TODAY - timedelta(days=1)), 0.05, 0.5, 1.0, "up", True)
-    for i, day in enumerate(day_list):
+    for day in day_list:
         repos.symbol_pnl.upsert_many(
             day,
             [
@@ -297,8 +297,6 @@ def seed(repos: Repositories, *, days: int = 40, symbols: tuple[str, ...] = SYMB
                 for k, s in enumerate(symbols)
             ],
         )
-        if i == 0:
-            continue
     repos.trades.upsert(
         {
             "trade_key": "BTCUSDT:1",

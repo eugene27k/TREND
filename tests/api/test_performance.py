@@ -17,10 +17,14 @@ from fastapi.testclient import TestClient
 
 from aegis.core.clock import day_start_ms
 from aegis.core.types import (
+    AccountState,
     DailyBar,
     EquityPoint,
     Fill,
+    IncomeType,
+    LedgerEntry,
     MetricValue,
+    Position,
     Side,
     SignalResult,
     Strategy,
@@ -171,6 +175,58 @@ def _seed_large(repos) -> None:
                 residuals=[],
             )
             repos.heartbeats.add(ts, ok=True)
+            # Funding settles three times a day per symbol: what the positions
+            # page has to sum per open position (US-T18 AC 3).
+            repos.ledger.add_many(
+                LedgerEntry(
+                    strategy=Strategy.TREND,
+                    ts_ms=ts + h * 8 * 3_600_000,
+                    income_type=IncomeType.FUNDING_FEE,
+                    asset="USDT",
+                    amount=-0.01,
+                    symbol=s,
+                    tran_id=f"{day.isoformat()}-{s}-{h}",
+                )
+                for s in SYMBOLS
+                for h in range(3)
+            )
+
+        # A full book, so the positions page is measured with something in it.
+        positions = [
+            Position(
+                symbol=s,
+                qty=10.0 if k % 2 == 0 else -10.0,
+                entry_price=100.0,
+                mark_price=100.0,
+                ts_ms=now_ms,
+            )
+            for k, s in enumerate(SYMBOLS)
+        ]
+        repos.positions.replace_all(positions, now_ms)
+        repos.snapshots.add(
+            AccountState(
+                ts_ms=now_ms,
+                wallet_balance=equity,
+                margin_balance=equity,
+                unrealized_pnl=0.0,
+                available_balance=equity * 0.7,
+                maint_margin=equity * 0.05,
+                initial_margin=equity * 0.2,
+            ),
+            positions,
+            gross=16_000.0,
+            net=0.0,
+        )
+        for k, s in enumerate(SYMBOLS):
+            repos.trades.upsert(
+                {
+                    "trade_key": f"{s}:1",
+                    "symbol": s,
+                    "side": "long" if k % 2 == 0 else "short",
+                    "open_ts": day_start_ms(TODAY - timedelta(days=30)),
+                    "days": 30.0,
+                }
+            )
 
         repos.metrics.save_many(
             [
@@ -209,3 +265,16 @@ def test_us_t18_ac8_rebalance_drilldown_is_fast_on_a_year_of_history(large_clien
     assert response.status_code == 200
     assert len(response.json()["targets"]) == len(SYMBOLS)
     assert elapsed < BUDGET_S, f"drill-down took {elapsed:.3f}s"
+
+
+def test_us_t18_ac8_the_positions_page_is_fast_with_a_full_book(large_client: TestClient) -> None:
+    """16 open positions, each summing its own episode's funding out of a year of it."""
+    large_client.get("/api/trend/positions")
+    started = time.perf_counter()
+    body = large_client.get("/api/trend/positions").json()
+    elapsed = time.perf_counter() - started
+    assert len(body["positions"]) == len(SYMBOLS)
+    # 30 days x 3 settlements x -0.01, bounded by the open episode rather than
+    # by the 400 days of funding the ledger holds.
+    assert body["positions"][0]["funding_accrued"] == pytest.approx(-0.01 * 3 * 31, abs=0.03)
+    assert elapsed < BUDGET_S, f"positions took {elapsed:.3f}s"

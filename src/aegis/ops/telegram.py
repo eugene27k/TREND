@@ -47,7 +47,7 @@ def make_poster(token: str, *, base: str = API_BASE) -> Poster:
 
 
 def format_alert(alert: Alert, prefix: str) -> str:
-    """``"TREND - SEVERITY - CODE\\nmessage"`` (Appendix D header, then the body)."""
+    """``"TREND · SEVERITY · CODE"`` then the body — Appendix D's header, same separator."""
     head = f"{prefix} · {alert.severity} · {alert.code}"
     return f"{head}\n{alert.message}" if alert.message else head
 

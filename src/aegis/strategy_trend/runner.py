@@ -30,11 +30,12 @@ from aegis.accounting.reconcile import Reconciler
 from aegis.accounting.snapshots import SnapshotService
 from aegis.analytics.engine import MetricsEngine
 from aegis.bars.service import BarService
-from aegis.core.clock import at_utc, day_of, month_key
+from aegis.core.clock import DAY_MS, at_utc, day_of, month_key
 from aegis.core.context import Context
 from aegis.core.errors import AegisError, ExchangeUnreachable, GatewayError, RateLimited
 from aegis.core.types import EngineState, Phase, RiskStatus, Severity
-from aegis.ops.controls import Controls
+from aegis.ops import reports as rp
+from aegis.ops.controls import FLATTEN_REQUEST, Controls
 from aegis.portfolio.governor import governor, is_downward
 from aegis.portfolio.sizing import size_targets
 from aegis.rebalance.drift import DriftMonitor
@@ -66,7 +67,14 @@ class TickReport:
 
 
 class TrendRunner:
-    def __init__(self, ctx: Context, *, heartbeat: Any = None, reporter: Any = None) -> None:
+    def __init__(
+        self,
+        ctx: Context,
+        *,
+        heartbeat: Any = None,
+        reporter: Any = None,
+        report_sender: Any = None,
+    ) -> None:
         self.ctx = ctx
         self.machine = StateMachine(ctx.repos, ctx.clock, phase=Phase(ctx.cfg.phase.current))
         self.schedule = sch.build_schedule(ctx.cfg)
@@ -85,6 +93,9 @@ class TrendRunner:
         self.controls = Controls(ctx)
         self.heartbeat = heartbeat
         self.reporter = reporter
+        #: ``(body) -> delivered``. A report is *stored* by the reporter and
+        #: *sent* here; ``reports.delivered`` must mean the operator has it.
+        self.report_sender = report_sender
         self._started = False
 
     # ------------------------------------------------------------------ #
@@ -277,6 +288,11 @@ class TrendRunner:
             self.controls.flatten_all(operator, reason, confirm)
             if self.ctx.gateway.positions():
                 self.executor.flatten_all(f"operator:{operator}", now_ms)
+            # The request is served, so it must not survive into the next tick as
+            # a standing instruction to flatten again.
+            self.machine.load()
+            self.machine.state.context.pop(FLATTEN_REQUEST, None)
+            self.machine.save()
         else:
             raise AegisError(f"unknown control action {action!r}")
         report.note(f"control:{action}")
@@ -306,7 +322,12 @@ class TrendRunner:
                 self._risk_cut(
                     {c.symbol: c.fraction for c in cuts}, reason=cuts[0].reason, now_ms=now_ms, report=report
                 )
-            self.supervisor.check_bnb_balance(now_ms)
+            # The reading, not just the alert: Appendix D's daily line prints
+            # "BNB fees 41 d" while cover is healthy, and only this path knows it.
+            days = self.supervisor.check_bnb_balance(now_ms)
+            if days is not None:
+                self.machine.state.context[rp.BNB_DAYS_KEY] = days
+                self.machine.save()
 
         if self.schedule.is_due(sch.STATUS_WATCH, now_ms):
             self.schedule.mark(sch.STATUS_WATCH, now_ms)
@@ -376,23 +397,68 @@ class TrendRunner:
             now_ms, drawdown, before, after, trigger=f"dd={drawdown:.4f}", applied=down
         )
         self.machine.set_governor(after)
+        # The cut's own numbers are known before it is sent — Appendix D's body
+        # announces what is about to happen — so the alert can carry them. A
+        # venue that cannot be read must still not swallow the alert, so the
+        # failure is held and re-raised (into safe mode) after it has gone out.
+        positions: dict[str, Any] = {}
+        unreachable: GatewayError | None = None
+        if down:
+            try:
+                positions = dict(self.ctx.gateway.positions())
+            except GatewayError as exc:
+                unreachable = exc
         self.ctx.alerts.warn(
             "GOVERNOR",
-            f"{before:g} -> {after:g} at drawdown {drawdown:.1%}",
+            self._governor_message(drawdown, before, after, len(positions), down=down),
             {"dd": drawdown, "g_before": before, "g_after": after},
         )
         if not down:
             report.note(f"governor_up:{after:g}")
             return
+        if unreachable is not None:
+            raise unreachable
 
         # An outright proportional cut, taker allowed, paired with nothing.
-        positions = self.ctx.gateway.positions()
         if positions:
             fraction = 1.0 - (after / before) if before > 0 else 1.0
             self._risk_cut(
                 dict.fromkeys(positions, fraction), reason="governor", now_ms=now_ms, report=report
             )
         report.note(f"governor_down:{after:g}")
+
+    def _governor_message(
+        self, dd: float, before: float, after: float, n_orders: int, *, down: bool
+    ) -> str:
+        """The Appendix D governor body (US-T17 AC 4) when a reporter is wired.
+
+        Only for a cut: Appendix D's wording is "Immediate cut", which an upward
+        transition — applied at the next rebalance, never immediately — would
+        misdescribe. That one keeps the plain line.
+        """
+        plain = f"{before:g} -> {after:g} at drawdown {dd:.1%}"
+        if self.reporter is None or not down:
+            return plain
+        snapshot = self.ctx.repos.snapshots.latest()
+        equity = float(snapshot["margin_balance"] or 0.0) if snapshot else 0.0
+        gross = abs(float(snapshot["gross_notional"] or 0.0)) if snapshot else 0.0
+        if not equity or before <= 0:
+            return plain
+        gross_x = gross / equity
+        try:
+            return str(
+                self.reporter.governor_alert(
+                    dd=dd,
+                    peak_equity=equity / (1.0 - dd) if dd < 1.0 else equity,
+                    g_before=before,
+                    g_after=after,
+                    gross_before=gross_x,
+                    gross_after=gross_x * (after / before),
+                    n_orders=n_orders,
+                )
+            )
+        except Exception:  # a report must never stop a risk action
+            return plain
 
     # ------------------------------------------------------------------ #
     # 3. Trading — only when nothing above blocked it
@@ -555,17 +621,55 @@ class TrendRunner:
 
         if self.reporter is None:
             return
-        for job, method, key in (
-            (sch.DAILY_REPORT, "daily", day_of(now_ms).isoformat()),
-            (sch.REBALANCE_REPORT, "rebalance_summary", f"rb-{day_of(now_ms).isoformat()}"),
+        # The 00:10 report covers the calendar day that has just *closed* — the
+        # one whose rebalance summary is already final (US-T17 AC 1). Reporting
+        # today at 00:10 would describe ten minutes and a rebalance still
+        # running. The 01:05 summary is today's, whose window ended at 01:00.
+        closed_day = day_of(now_ms - DAY_MS)
+        rebalance_id = f"rb-{day_of(now_ms).isoformat()}"
+        if self.schedule.is_due(sch.DAILY_REPORT, now_ms):
+            # US-T17 AC 1 wants "day P&L by component" in the 00:10 body, but the
+            # metrics job that attributes day D runs at 01:10 on D+1 — an hour
+            # later. Attribute the closed day here if nothing has yet, or the
+            # headline of every daily report would read n/a. The 01:10 job
+            # recomputes the same day idempotently.
+            with contextlib.suppress(Exception):
+                if not self.ctx.repos.symbol_pnl.between(closed_day, closed_day):
+                    self.attribution.compute_day(closed_day, now_ms)
+        for job, method, kind, key in (
+            (sch.DAILY_REPORT, "daily", rp.DAILY, closed_day),
+            (sch.REBALANCE_REPORT, "rebalance_summary", rp.REBALANCE, rebalance_id),
         ):
             if self.schedule.is_due(job, now_ms):
                 self.schedule.mark(job, now_ms)
                 try:
-                    getattr(self.reporter, method)(day_of(now_ms) if method == "daily" else key, now_ms)
+                    body = getattr(self.reporter, method)(key, now_ms)
                     report.note(job)
                 except Exception as exc:  # a report must never stop the engine
                     self.ctx.alerts.warn("REPORT_FAILED", f"{job}: {exc}", {"job": job})
+                    continue
+                period_key = key if isinstance(key, str) else key.isoformat()
+                if self._send_report(kind, period_key, str(body)):
+                    report.note(f"{job}:sent")
+
+    def _send_report(self, kind: str, period_key: str, body: str) -> bool:
+        """Deliver a stored body (US-T17 AC 1) and record that it got through.
+
+        Storing is not sending: the reporter writes the body so the day can be
+        reconstructed from the database, but the operator only has it once a sink
+        took it, which is what ``reports.delivered`` — and the Operations page —
+        mean. A dead channel leaves the row undelivered instead of raising.
+        """
+        if self.report_sender is None:
+            return False
+        try:
+            delivered = bool(self.report_sender(body))
+        except Exception as exc:  # a chat outage is not an engine fault
+            self.ctx.alerts.warn("REPORT_FAILED", f"{kind}: {exc}", {"kind": kind})
+            return False
+        if delivered:
+            self.ctx.repos.reports.mark_delivered(kind, period_key)
+        return delivered
 
     def _beat(self, now_ms: int, report: TickReport) -> None:
         if self.heartbeat is None or not self.schedule.is_due(sch.HEARTBEAT, now_ms):

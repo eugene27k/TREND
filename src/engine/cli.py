@@ -85,6 +85,19 @@ def build_context(cfg: AppConfig) -> Context:
     return Context(cfg=cfg, clock=clock, gateway=build_gateway(cfg, clock), repos=repos, alerts=alerts)
 
 
+def _report_sender(cfg: AppConfig) -> Any:
+    """``(body) -> delivered`` for the Appendix D report bodies, or None when off.
+
+    Reports go down the same channel as the alerts but not through the alert bus:
+    a report is not an event and must not be repeat-suppressed with one.
+    """
+    try:
+        from aegis.ops.telegram import TelegramSink
+    except ImportError:  # pragma: no cover - optional at build time
+        return None
+    return TelegramSink(cfg).send if cfg.telegram.enabled else None
+
+
 def _attach_sinks(cfg: AppConfig, alerts: AlertBus) -> None:
     try:
         from aegis.ops.telegram import TelegramSink
@@ -263,7 +276,12 @@ def cmd_run(cfg: AppConfig, args: argparse.Namespace) -> int:
     try:
         for check in assert_safe_to_start(cfg, ctx.gateway, ctx.clock.now_ms()):
             LOG.info("startup %-16s %s", check.name, check.detail)
-        runner = TrendRunner(ctx, heartbeat=Heartbeat(ctx), reporter=Reporter(ctx))
+        runner = TrendRunner(
+            ctx,
+            heartbeat=Heartbeat(ctx),
+            reporter=Reporter(ctx),
+            report_sender=_report_sender(cfg),
+        )
         runner.start()
         LOG.info("engine started: %s", json_dumps(runner.status(ctx.clock.now_ms())))
         if args.once:

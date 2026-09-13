@@ -8,6 +8,13 @@ history endpoint feeds the 90-day chart.
 Symbols are taken from the latest stored signal day and unioned with whatever
 the book still holds, so a position in a symbol that has left the universe stays
 visible instead of quietly disappearing from the page that explains it.
+
+The vol shown is the latest daily estimate (``risk_model_snapshots``, US-T05
+AC 3), not the copy stored with the last rebalance's targets: signals and
+estimates are written every day, targets only when a rebalance runs, so reading
+the target's copy would print a stale vol beside a fresh signal on any day the
+rebalance was deferred or the sleeve was paused. The target's own vol is the
+fallback for a symbol the estimator has no row for.
 """
 
 from __future__ import annotations
@@ -79,6 +86,8 @@ def signals(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Sig
     day = repos.signals.latest_day()
     snapshots = {r["symbol"]: r for r in (repos.signals.day(day) if day else [])}
     targets = {r["symbol"]: r for r in repos.targets.latest()}
+    risk_model = repos.risk_model.latest()
+    vols = dict(risk_model.vols) if risk_model else {}
     positions = repos.positions.all()
     month = repos.universe.latest_month()
     universe = set(repos.universe.symbols(month)) if month else set()
@@ -102,7 +111,7 @@ def signals(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Sig
                 u2=snap.get("u2") if snap else None,
                 u3=snap.get("u3") if snap else None,
                 warm=bool(snap["warm"]) if snap else False,
-                vol=_f(tgt, "vol") if tgt else None,
+                vol=vols.get(symbol, _f(tgt, "vol") if tgt else None),
                 target_notional=target_notional,
                 current_notional=current,
                 delta_notional=target_notional - current,

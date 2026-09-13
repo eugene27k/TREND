@@ -46,6 +46,10 @@ MONTHLY = "monthly"
 BACKUP_LAG_KEY = "backup_lag_s"
 BNB_DAYS_KEY = "bnb_days"
 
+#: Section 10 regime buckets in the PRD's order (``analytics.trend_metrics.regime_table``):
+#: BTC month below -10 %, between, above +10 %.
+REGIME_ORDER = ("down", "flat", "up")
+
 #: How far back ``due_reports`` looks for something it never sent.
 DAILY_LOOKBACK_DAYS = 7
 WEEKLY_LOOKBACK = 4
@@ -156,8 +160,7 @@ class Reporter:
         day_change = None if row is None else _float(row["twr_factor"])
         since = None if row is None else _float(row["twr_index"])
         dd = None if row is None else _float(row["drawdown"])
-        gov = self.ctx.repos.governor.last_before(end_ms - 1)
-        g = _float(gov["g_after"]) if gov else 1.0
+        g = self._governor_g(end_ms)
         head = unit(num(equity), "USDT")
         change = (
             NA
@@ -166,6 +169,19 @@ class Reporter:
             f" {signed_pct(None if since is None else since - 1.0)} since start)"
         )
         return f"Equity {head} {change}{SEP}DD from peak {pct(dd)}{SEP}g = {g_text(g)}"
+
+    def _governor_g(self, end_ms: int) -> float | None:
+        """The multiplier in force at the end of the day, else the engine's own value.
+
+        Never a hard-coded 1.0: printing "g = 1.0" because the table is empty
+        would tell the operator exposure is unthrottled on exactly the morning
+        the reporter cannot tell (rule 2 — a missing value is ``n/a``).
+        """
+        gov = self.ctx.repos.governor.last_before(end_ms - 1)
+        if gov is not None:
+            return _float(gov["g_after"])
+        row = self.ctx.repos.state.load()
+        return None if row is None else _float(row["governor_g"])
 
     def _pnl_line(self, day: date) -> str:
         rows = self.ctx.repos.symbol_pnl.between(day, day)
@@ -369,7 +385,9 @@ class Reporter:
 
     def weekly(self, week_key: str, now_ms: int) -> str:
         start, end = week_bounds(week_key)
-        body = self._period_body(WEEKLY, week_key, start, end, "30d")
+        # The metric period matches the report's own window: a body headed with
+        # one week may not print a month of Sharpe under it (US-T17 AC 2).
+        body = self._period_body(WEEKLY, week_key, start, end, "7d")
         self.ctx.repos.reports.save(WEEKLY, week_key, body, now_ms)
         return body
 
@@ -445,13 +463,19 @@ class Reporter:
         )
 
     def _regime(self, period: str) -> str:
+        """Section 10: per BTC-return bucket, P&L **and hit rate and average exposure**."""
         _, extra = self._metric("regime_table", period)
         buckets = extra.get("buckets") if isinstance(extra, dict) else None
         if not buckets:
             return NA
+        names = [b for b in REGIME_ORDER if b in buckets]
+        names += sorted(set(buckets) - set(REGIME_ORDER))
         return SEP.join(
-            f"{name} {int(data.get('months') or 0)} m {signed(_float(data.get('pnl')))}"
-            for name, data in sorted(buckets.items())
+            f"{name} {int(buckets[name].get('months') or 0)} m"
+            f" {signed(_float(buckets[name].get('pnl')))}"
+            f" hit {pct(_float(buckets[name].get('hit_rate')), 0)}"
+            f" exposure {times(_float(buckets[name].get('avg_exposure')))}"
+            for name in names
         )
 
     def _tracking(self) -> str:
@@ -484,15 +508,17 @@ class Reporter:
         """Appendix D governor message. Not persisted — it is an alert, not a report."""
         restore_g, restore_dd = self.restore_step(g_after)
         permission = "taker allowed" if taker_allowed else "maker only"
-        return "\n".join(
-            [
-                f"{self.prefix}{SEP}{severity}{SEP}GOVERNOR {g_text(g_before)} {ARROW} {g_text(g_after)}",
-                f"Drawdown {pct(dd)} from peak {num(peak_equity)}. Immediate cut:"
-                f" gross {times(gross_before)} {ARROW} {times(gross_after)}"
-                f" ({n_orders} reduce-only orders, {permission}).",
-                f"Restore to {g_text(restore_g)} when DD < {pct(restore_dd, 0)}.",
-            ]
-        )
+        lines = [
+            f"{self.prefix}{SEP}{severity}{SEP}GOVERNOR {g_text(g_before)} {ARROW} {g_text(g_after)}",
+            f"Drawdown {pct(dd)} from peak {num(peak_equity)}. Immediate cut:"
+            f" gross {times(gross_before)} {ARROW} {times(gross_after)}"
+            f" ({n_orders} reduce-only orders, {permission}).",
+        ]
+        # Already at full risk: there is no rung above, so promising a restore to
+        # "n/a when DD < n/a" would be worse than saying nothing.
+        if restore_g is not None:
+            lines.append(f"Restore to {g_text(restore_g)} when DD < {pct(restore_dd, 0)}.")
+        return "\n".join(lines)
 
     def restore_step(self, g_after: float) -> tuple[float | None, float | None]:
         """The next restore rung above ``g_after`` (Section 5.7 ``governor.up``)."""

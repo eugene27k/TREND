@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from aegis.api.deps import (
     StrategyDeps,
+    cap_breaches,
     engine_state,
     get_registry,
     get_sleeve,
@@ -117,6 +118,20 @@ def _cap(name: str, limit_x: float, used: float, equity: float) -> CapRow:
     )
 
 
+def _funding_accrued(repos: Any, symbol: str, now_ms: int) -> float:
+    """Funding booked for the position that is open *now*.
+
+    Bounded by the open episode's start (``trades``, US-T14 AC 4) so the number
+    belongs to the position on the screen: summing the symbol's whole ledger
+    history would credit this long with the funding a short paid last month.
+    Without an open episode recorded yet the answer is the symbol's whole
+    history, which is all the evidence there is.
+    """
+    episode = repos.trades.open_trade(symbol)
+    start_ms = int(episode["open_ts"]) if episode else 0
+    return repos.ledger.sum_by_symbol(str(IncomeType.FUNDING_FEE), start_ms, now_ms + 1).get(symbol, 0.0)
+
+
 def _kill_board(repos: Any, blocks: list[str]) -> list[KillRuleRow]:
     out: list[KillRuleRow] = []
     for rule in ALL_RULES:
@@ -146,7 +161,6 @@ def positions(
     equity = latest_equity(repos)
     state = engine_state(repos, cfg)
     snap = repos.snapshots.latest()
-    funding = repos.ledger.sum_by_symbol(str(IncomeType.FUNDING_FEE), 0, now_ms + 1)
     targets = repos.targets.latest_by_symbol()
 
     rows = [
@@ -158,7 +172,7 @@ def positions(
             entry_price=p.entry_price,
             mark_price=p.mark_price,
             unrealized_pnl=p.unrealized_pnl,
-            funding_accrued=funding.get(p.symbol, 0.0),
+            funding_accrued=_funding_accrued(repos, p.symbol, now_ms),
             adl_quantile=p.adl_quantile,
             leverage=p.leverage,
             liquidation_price=p.liquidation_price,
@@ -195,7 +209,7 @@ def positions(
     return PositionsResponse(
         strategy=str(sleeve.strategy),
         as_of_ts=now_ms,
-        risk_status=str(risk_status(cfg, margin.margin_ratio, state)),
+        risk_status=str(risk_status(cfg, margin.margin_ratio, state, cap_breaches(cfg, book, equity))),
         state=state["state"],
         blocks=state["blocks"],
         governor_g=state["governor_g"],

@@ -254,8 +254,12 @@ except the `/controls` endpoints which append to `control_log` for the engine to
 repos.state.log_control(action, operator, reason, {"source": "api", "confirm": confirm}, now_ms)
 ```
 
-It must NOT touch `engine_state`, and it must not validate the confirmation token
-— the engine does that, so the check lives in one place. `"source": "api"` is what
+It must NOT touch `engine_state`, and it must never *consume* the confirmation
+token: whatever the operator typed is forwarded in the payload and the engine
+re-checks it, so the rule lives in one place. The endpoint may pre-flight the
+destructive actions (400 rather than a 202 for a command that cannot work), but
+only by asking the engine's own question — `cfg.phase.live_confirm or
+CONFIRM_TOKEN`, exactly as `Controls._check_confirm` does. `"source": "api"` is what
 marks the row as a *command*: the engine skips rows without it, because `Controls`
 writes its own audit row for every action it applies and replaying those would
 loop forever. The engine drains rows with `repos.state.controls_after(last_id)` at

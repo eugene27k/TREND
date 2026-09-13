@@ -68,6 +68,7 @@ ignore = ["E501", "B008", "RUF012", "SIM108", "RET504"]
 # MULTIPLICATION SIGN in the Telegram message formats. They are the spec, not typos.
 "src/aegis/ops/reports.py" = ["RUF001", "RUF002"]
 "tests/ops/test_reports.py" = ["RUF001", "RUF002"]
+"tests/integration/test_acceptance.py" = ["RUF001", "RUF002"]
 
 [tool.mypy]
 python_version = "3.12"

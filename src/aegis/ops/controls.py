@@ -85,9 +85,21 @@ class Controls:
         }
 
     def may_rebalance(self) -> bool:
-        """The scheduled rebalance — the only scheduled trading event (Invariant 9)."""
+        """The scheduled rebalance — the only scheduled trading event (Invariant 9).
+
+        Safe mode is a refusal here, not just for growth: US-T13 AC 2 permits
+        "risk-reducing orders only" while it holds, and a rebalance sends both
+        directions. The engine must also be idle — asking again while it is
+        already ``COMPUTING`` or ``REBALANCING`` would start a second pass over a
+        half-traded book and trade the difference twice (5.11).
+        """
         s = self.state()
-        return not s["paused"] and not s["stopped"] and s["state"] not in _NO_TRADE
+        return (
+            not s["paused"]
+            and not s["stopped"]
+            and not s["safe_mode"]
+            and s["state"] == str(EngineState.IDLE)
+        )
 
     def may_increase_risk(self) -> bool:
         """Invariant 1: growth needs a clean engine, no block and no operator hold."""

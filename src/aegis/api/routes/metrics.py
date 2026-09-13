@@ -67,7 +67,12 @@ def metrics(
     blocks: list[PeriodBlock] = []
     for p in wanted:
         in_period = sorted([r for r in rows if r.period == p], key=lambda r: r.name)
-        extra = in_period[0].extra if in_period else {}
+        # The window context (``active_days`` and the greying flag of Section
+        # 10.5) is the same on every row the metric engine wrote, but a row from
+        # elsewhere — the optional ``rss_mb`` / ``cpu_pct`` readings — carries no
+        # extras, so take it from a row that actually has it rather than from
+        # whichever name happens to sort first.
+        extra = next((r.extra for r in in_period if "active_days" in r.extra), {})
         blocks.append(
             PeriodBlock(
                 period=p,

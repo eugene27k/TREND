@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -39,7 +39,8 @@ from fastapi import HTTPException, Request
 
 from aegis.core.clock import Clock, SystemClock, day_of
 from aegis.core.config import AppConfig, load_config
-from aegis.core.types import EngineState, Phase, RiskStatus, Strategy
+from aegis.core.errors import AegisError
+from aegis.core.types import EngineState, Phase, Position, RiskStatus, Strategy
 from aegis.storage.db import Database, json_loads
 from aegis.storage.repositories import Repositories, StateRepo
 
@@ -55,6 +56,9 @@ DAY_MIN = "0000-01-01"
 DAY_MAX = "9999-12-31"
 
 _PERIOD_DAYS: dict[str, int] = {"7d": 7, "30d": 30, "90d": 90}
+
+#: How often a sleeve that is not deployed *yet* is looked for again.
+RESOLVE_RETRY_MS = 5_000
 
 
 # --------------------------------------------------------------------------- #
@@ -107,7 +111,7 @@ class ReadOnlyDatabase(Database):
             return conn
 
     def migrate(self, directory: Path | None = None) -> list[str]:  # noqa: ARG002 - signature match
-        raise RuntimeError("the API never migrates a database")
+        raise AegisError("the API never migrates a database")
 
 
 # --------------------------------------------------------------------------- #
@@ -130,10 +134,27 @@ class StrategyDeps:
 
 
 class Registry:
-    """Every sleeve the API can answer for, resolved once at startup."""
+    """Every sleeve the API can answer for.
 
-    def __init__(self, sleeves: Mapping[Strategy, StrategyDeps], clock: Clock, started_ms: int) -> None:
+    Resolved at start-up and re-probed while something is missing: the dashboard
+    and the engines come up together (US-T19 AC 1) and an engine creates its
+    SQLite file on its first migration, so a registry that only looked once
+    would serve an empty strategy selector until someone restarted the
+    container. A missing sleeve therefore costs one stat every
+    ``RESOLVE_RETRY_MS`` and nothing else.
+    """
+
+    def __init__(
+        self,
+        sleeves: Mapping[Strategy, StrategyDeps],
+        clock: Clock,
+        started_ms: int,
+        pending: Mapping[str, str | Path] | None = None,
+    ) -> None:
         self._sleeves = dict(sleeves)
+        self._pending = dict(pending or {})
+        self._lock = threading.Lock()
+        self._last_probe_ms = started_ms
         self.clock = clock
         self.started_ms = started_ms
 
@@ -144,21 +165,43 @@ class Registry:
         clock = clock or SystemClock()
         paths = dict(config_paths) if config_paths is not None else dict(DEFAULT_CONFIG_PATHS)
         sleeves: dict[Strategy, StrategyDeps] = {}
+        pending: dict[str, str | Path] = {}
         for name, config_path in paths.items():
             sleeve = _try_open(name, config_path)
             if sleeve is not None:
                 sleeves[sleeve.strategy] = sleeve
-        return cls(sleeves, clock, clock.now_ms())
+            else:
+                pending[name] = config_path
+        return cls(sleeves, clock, clock.now_ms(), pending)
 
     @property
     def strategies(self) -> list[Strategy]:
+        self._resolve_pending()
         return sorted(self._sleeves, key=str)
+
+    def _resolve_pending(self) -> None:
+        """Try again to open the sleeves that were not there at start-up."""
+        if not self._pending:
+            return
+        now = self.clock.now_ms()
+        with self._lock:
+            if now - self._last_probe_ms < RESOLVE_RETRY_MS:
+                return
+            self._last_probe_ms = now
+            for name, config_path in list(self._pending.items()):
+                sleeve = _try_open(name, config_path)
+                if sleeve is not None:
+                    self._sleeves[sleeve.strategy] = sleeve
+                    del self._pending[name]
 
     def get(self, name: str) -> StrategyDeps:
         parsed = parse_strategy(name)
         if parsed is None:
             raise HTTPException(404, f"unknown strategy {name!r}; known: {[str(s) for s in Strategy]}")
         sleeve = self._sleeves.get(parsed)
+        if sleeve is None:
+            self._resolve_pending()
+            sleeve = self._sleeves.get(parsed)
         if sleeve is None:
             available = [str(s) for s in self.strategies]
             raise HTTPException(
@@ -173,6 +216,7 @@ class Registry:
         for sleeve in self._sleeves.values():
             sleeve.close()
         self._sleeves.clear()
+        self._pending.clear()
 
     # -- the one write path ------------------------------------------------- #
 
@@ -211,9 +255,17 @@ def _try_open(name: str, config_path: str | Path) -> StrategyDeps | None:
     db_path = Path(cfg.storage.db_path)
     if not db_path.exists():
         return None
+    db: ReadOnlyDatabase | None = None
     try:
         db = ReadOnlyDatabase(db_path, busy_timeout_ms=cfg.storage.busy_timeout_ms)
+        # SQLite opens lazily, so a truncated or half-restored file connects
+        # happily and only fails on the first real read. Probe it here: a sleeve
+        # we cannot read is absent (404 with a message that says so) rather than
+        # a live sleeve whose every page is a 500.
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' LIMIT 1")
     except sqlite3.Error:
+        if db is not None:
+            db.close()
         return None
     return StrategyDeps(strategy=strategy, cfg=cfg, db_path=db_path, db=db, repos=Repositories(db, strategy))
 
@@ -349,18 +401,48 @@ def latest_equity(repos: Repositories) -> float:
     return float(snap["margin_balance"]) if snap else 0.0
 
 
-def risk_status(cfg: AppConfig, margin_ratio: float, state: Mapping[str, Any]) -> RiskStatus:
+def cap_breaches(cfg: AppConfig, book: Mapping[str, Position], equity: float) -> list[str]:
+    """Which of the three caps the stored book exceeds — the supervisor's own test.
+
+    ``RiskSupervisor.check`` classifies a book ``amber`` when *any* cap is
+    exceeded by fills or price moves (US-T12 AC 1), and it does not persist that
+    verdict, so the dashboard has to re-apply the same comparison to the last
+    recorded book rather than colour by margin alone.
+    """
+    if equity <= 0 or not book:
+        return []
+    gross = sum(abs(p.notional) for p in book.values())
+    net = sum(p.notional for p in book.values())
+    largest = max((abs(p.notional) for p in book.values()), default=0.0)
+    out: list[str] = []
+    if gross > cfg.caps.gross * equity:
+        out.append("gross")
+    if abs(net) > cfg.caps.net * equity:
+        out.append("net")
+    if largest > cfg.caps.single * equity:
+        out.append("single")
+    return out
+
+
+def risk_status(
+    cfg: AppConfig,
+    margin_ratio: float,
+    state: Mapping[str, Any],
+    breaches: Sequence[str] = (),
+) -> RiskStatus:
     """The tile colour, derived from stored state only.
 
     ``ExposureSnapshot.status`` is a live reading the supervisor never persists,
     so the dashboard recolours from what *is* stored: the margin ratio of the
-    last snapshot and the engine's own holds.
+    last snapshot, the caps against the last recorded book and the engine's own
+    holds. US-T12 AC 1: green is "all caps satisfied *and* margin < 20 %", so a
+    cap breach is amber even on a comfortable margin.
     """
     if state["state"] in (str(EngineState.HALTED_RISK), str(EngineState.STOPPED)):
         return RiskStatus.RED
     if margin_ratio >= cfg.risk.margin_red:
         return RiskStatus.RED
-    if margin_ratio >= cfg.risk.margin_amber or state["blocks"] or state["safe_mode"]:
+    if margin_ratio >= cfg.risk.margin_amber or breaches or state["blocks"] or state["safe_mode"]:
         return RiskStatus.AMBER
     return RiskStatus.GREEN
 
@@ -373,11 +455,13 @@ __all__ = [
     "DAY_MAX",
     "DAY_MIN",
     "DEFAULT_CONFIG_PATHS",
+    "RESOLVE_RETRY_MS",
     "MetricIndex",
     "ReadOnlyDatabase",
     "Registry",
     "StrategyDeps",
     "Window",
+    "cap_breaches",
     "engine_state",
     "first_equity_day",
     "get_registry",

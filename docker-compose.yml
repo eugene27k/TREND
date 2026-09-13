@@ -81,9 +81,14 @@ services:
     ports:
       - "127.0.0.1:8000:8000"    # behind the host firewall; tunnel to reach it
     volumes:
-      # Read-only: the dashboard never writes to an engine's database.
-      - trend-data:/app/data:ro
-      - carry-data:/app/carry-data:ro
+      # The dashboard reads every page through SQLite's own mode=ro connection
+      # (aegis.api.deps.ReadOnlyDatabase), which is where the single-writer rule
+      # is enforced. The mount cannot be :ro as well: POST /api/{strategy}/controls
+      # appends the operator's Start/Pause/Stop/Flatten row to control_log for the
+      # engine to apply (docs/SERVICES.md, PRD Section 7, US-T13 AC 3), and on a
+      # read-only filesystem every control from the dashboard would fail instead.
+      - trend-data:/app/data
+      - carry-data:/app/carry-data
     mem_limit: 192m
     cpus: 0.3
 

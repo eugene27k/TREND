@@ -101,7 +101,7 @@ def submit_control(
     sleeve: StrategyDeps = Depends(get_sleeve),
 ) -> ControlAccepted:
     registry: Registry = get_registry(request)
-    _validate(body)
+    _validate(body, sleeve)
     now_ms = registry.now_ms()
     registry.append_control(
         sleeve,
@@ -125,9 +125,21 @@ def submit_control(
     )
 
 
-def _validate(body: ControlRequest) -> None:
-    if body.action in _NEEDS_CONFIRM and body.confirm != CONFIRM_TOKEN:
-        raise HTTPException(400, f"action {body.action!r} requires confirm == {CONFIRM_TOKEN!r}")
+def _expected_confirm(sleeve: StrategyDeps) -> str:
+    """The token this sleeve's engine will accept — ``aegis.ops.controls`` decides it.
+
+    A deployment may set ``phase.live_confirm`` to its own string, and
+    ``Controls._check_confirm`` then requires *that* one. The pre-flight has to
+    ask the same question, or a sleeve with a configured token would refuse the
+    operator's correct string with a 400 and accept the wrong one with a 202.
+    """
+    return sleeve.cfg.phase.live_confirm or CONFIRM_TOKEN
+
+
+def _validate(body: ControlRequest, sleeve: StrategyDeps) -> None:
+    expected = _expected_confirm(sleeve)
+    if body.action in _NEEDS_CONFIRM and body.confirm != expected:
+        raise HTTPException(400, f"action {body.action!r} requires confirm == {expected!r}")
     if body.action in (STOP, FLATTEN_ALL, CLEAR_HALT) and not body.reason.strip():
         raise HTTPException(400, f"action {body.action!r} requires a written reason")
 

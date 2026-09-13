@@ -25,6 +25,7 @@ from aegis.api.deps import (
     MetricIndex,
     Registry,
     StrategyDeps,
+    cap_breaches,
     engine_state,
     first_equity_day,
     get_registry,
@@ -150,15 +151,17 @@ def _summary(sleeve: StrategyDeps) -> SleeveSummary:
     curve_row = repos.equity.latest()
     snap = repos.snapshots.latest()
     margin_ratio = float(snap["margin_ratio"]) if snap else 0.0
+    equity = latest_equity(repos)
+    breaches = cap_breaches(sleeve.cfg, repos.positions.all(), equity)
     return SleeveSummary(
         strategy=str(sleeve.strategy),
-        equity=latest_equity(repos),
+        equity=equity,
         current_drawdown=float(curve_row["drawdown"]) if curve_row else 0.0,
         max_drawdown=metrics.value("max_drawdown", "since_inception"),
         governor_g=state["governor_g"],
         state=state["state"],
         phase=state["phase"],
-        risk_status=str(risk_status(sleeve.cfg, margin_ratio, state)),
+        risk_status=str(risk_status(sleeve.cfg, margin_ratio, state, breaches)),
         paused=state["paused"],
         blocks=state["blocks"],
     )
@@ -196,6 +199,7 @@ def overview(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Ov
 
     snap = repos.snapshots.latest()
     equity = latest_equity(repos)
+    breaches = cap_breaches(cfg, repos.positions.all(), equity)
     gross = float(snap["gross_notional"]) if snap else 0.0
     net = float(snap["net_notional"]) if snap else 0.0
     margin_ratio = float(snap["margin_ratio"]) if snap else 0.0
@@ -221,7 +225,7 @@ def overview(request: Request, sleeve: StrategyDeps = Depends(get_sleeve)) -> Ov
         net_x=net / equity if equity > 0 else 0.0,
         phase=state["phase"],
         state=state["state"],
-        risk_status=str(risk_status(cfg, margin_ratio, state)),
+        risk_status=str(risk_status(cfg, margin_ratio, state, breaches)),
         paused=state["paused"],
         blocks=state["blocks"],
         below_min_active_days=bool(metrics.extra("sharpe", "since_inception").get("below_min_active", True)),

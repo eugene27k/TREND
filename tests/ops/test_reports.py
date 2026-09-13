@@ -70,12 +70,33 @@ def test_a_daily_report_on_an_empty_database_renders_n_a_and_never_crashes(
 
     lines = body.split("\n")
     assert lines[0] == "TREND · daily · 2026-09-08"
-    assert lines[1] == f"Equity {NA} {NA} · DD from peak {NA} · g = 1.0"
+    assert lines[1] == f"Equity {NA} {NA} · DD from peak {NA} · g = {NA}"
     assert lines[2] == f"Net P&L day {NA}"
     assert lines[3] == f"Exposure gross {NA} · net {NA} · {NA} · largest {NA}"
     assert lines[5] == f"Rebalance {NA}"
     assert lines[6] == f"Risk {NA} · margin {NA} · ADL {NA} · caps {NA}"
     assert "0" not in lines[2]
+
+
+def test_the_governor_multiplier_falls_back_to_the_engine_state_never_to_one(
+    cfg, report_clock, gateway, repos
+) -> None:
+    """An empty governor table is not evidence that exposure is unthrottled."""
+    repos.state.save(
+        state="IDLE",
+        phase="P1_PAPER",
+        paused=False,
+        stopped=False,
+        safe_mode=False,
+        halt_reason="",
+        governor_g=0.25,
+        blocks=[],
+        context={},
+        now_ms=day_start_ms(DAY),
+    )
+    ctx = _ctx(cfg, report_clock, gateway, repos)
+
+    assert Reporter(ctx).daily(DAY, ctx.now_ms()).split("\n")[1].endswith("g = 0.25")
 
 
 def test_a_cap_breach_downgrades_the_risk_line_to_amber(cfg, report_clock, gateway, repos) -> None:
@@ -177,6 +198,21 @@ def test_us_t17_ac3_governor_alert_matches_appendix_d(rctx: Context) -> None:
         " (14 reduce-only orders, taker allowed).",
         "Restore to 1.0 when DD < 8 %.",
     ]
+
+
+def test_a_body_at_full_risk_promises_no_restore_it_cannot_name(rctx: Context) -> None:
+    body = Reporter(rctx).governor_alert(
+        dd=0.05,
+        peak_equity=10240.0,
+        g_before=0.5,
+        g_after=1.0,
+        gross_before=0.65,
+        gross_after=1.30,
+        n_orders=0,
+    )
+
+    assert len(body.split("\n")) == 2
+    assert NA not in body
 
 
 def test_the_restore_rung_comes_from_the_configured_governor_ladder(rctx: Context) -> None:
@@ -396,31 +432,45 @@ def test_net_and_single_cap_breaches_are_named(cfg, report_clock, gateway, repos
     assert "caps breached net/single" in line
 
 
-def test_the_regime_table_is_rendered_when_the_metric_exists(rctx: Context) -> None:
+def test_us_t17_ac2_the_regime_table_carries_pnl_hit_rate_and_exposure(rctx: Context) -> None:
+    """Section 10: "strategy P&L, hit rate and average exposure per bucket" — all three.
+
+    The buckets come from the real metric function, not a shape invented here,
+    so the report cannot drift away from what the metrics engine stores.
+    """
+    from aegis.analytics.trend_metrics import regime_table
     from aegis.core.types import MetricValue
 
+    buckets = regime_table(
+        monthly_strategy_pnl={"2026-06": -30.0, "2026-07": 80.0, "2026-08": 40.0},
+        monthly_btc_returns={"2026-06": -0.22, "2026-07": 0.15, "2026-08": 0.30},
+        exposures={"2026-06": 1.1, "2026-07": 1.2, "2026-08": 1.4},
+    )
+    # Independently: one down month at -30, two up months at +120 and a 100 %
+    # up-bucket hit rate with average gross exposure 1.3x.
+    assert buckets["down"] == {
+        "label": "< -10%",
+        "months": 1,
+        "pnl": -30.0,
+        "hit_rate": 0.0,
+        "avg_exposure": 1.1,
+    }
     rctx.repos.metrics.save_many(
         [
             MetricValue(
-                Strategy.TREND,
-                "regime_table",
-                "30d",
-                None,
-                rctx.now_ms(),
-                n_obs=3,
-                extra={
-                    "buckets": {
-                        "btc_up": {"months": 2, "pnl": 120.0},
-                        "btc_down": {"months": 1, "pnl": -30.0},
-                    }
-                },
+                Strategy.TREND, "regime_table", "7d", None, rctx.now_ms(), n_obs=3,
+                extra={"buckets": buckets},
             ),
         ]
     )
 
     line = Reporter(rctx).weekly("2026-W37", rctx.now_ms()).split("\n")[6]
 
-    assert line == "Regime: btc_down 1 m −30.00 · btc_up 2 m +120.00"
+    assert line == (
+        "Regime: down 1 m −30.00 hit 0 % exposure 1.10×"
+        " · flat 0 m +0.00 hit n/a exposure n/a"
+        " · up 2 m +120.00 hit 100 % exposure 1.30×"
+    )
 
 
 def test_a_report_uses_the_last_bnb_low_alert_when_the_state_has_no_reading(

@@ -63,6 +63,21 @@ def test_invariant1_safe_mode_stops_risk_increase(ctx: Context) -> None:
     assert controls.may_reduce_risk() is True
 
 
+def test_us_t13_ac2_safe_mode_permits_risk_reduction_only_so_no_rebalance(ctx: Context) -> None:
+    """A rebalance sends risk-increasing orders, so safe mode must refuse it."""
+    _save(ctx, safe_mode=True)
+
+    assert Controls(ctx).may_rebalance() is False
+
+
+@pytest.mark.parametrize("engine_state", [EngineState.COMPUTING, EngineState.REBALANCING])
+def test_a_rebalance_already_under_way_is_not_started_again(ctx: Context, engine_state) -> None:
+    """5.11: a second pass over a half-traded book would trade the difference twice."""
+    _save(ctx, state=str(engine_state))
+
+    assert Controls(ctx).may_rebalance() is False
+
+
 def test_every_action_appends_an_audited_control_row(ctx: Context) -> None:
     controls = Controls(ctx)
     controls.start("alice", "morning start")

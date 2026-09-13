@@ -1732,7 +1732,11 @@ class BacktestRepo:
         )
 
     def get_run(self, run_id: str) -> dict[str, Any] | None:
-        return self.db.query_one("SELECT * FROM backtest_runs WHERE run_id = ?", (run_id,))
+        """One run of *this* strategy. The id comes from the dashboard's query
+        string, so the strategy filter of US-T01 AC 2 belongs here too."""
+        return self.db.query_one(
+            "SELECT * FROM backtest_runs WHERE strategy = ? AND run_id = ?", (str(self.strategy), run_id)
+        )
 
     def latest_run(self, variant: str = "default") -> dict[str, Any] | None:
         return self.db.query_one(

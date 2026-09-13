@@ -13,8 +13,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aegis.core.clock import to_ms
-from aegis.core.types import Position
-from tests.api.conftest import GET_ROUTES, build_client, make_db, write_config
+from aegis.core.types import Position, Strategy
+from aegis.storage.repositories import Repositories
+from tests.api.conftest import GET_ROUTES, build_client, make_db, seed, write_config
 
 
 def test_us_t18_every_page_returns_200_on_an_empty_database(empty_client: TestClient) -> None:
@@ -77,6 +78,34 @@ def test_us_t18_ac7_a_sleeve_that_is_not_deployed_is_absent_not_a_500(tmp_path: 
 
 def test_backtest_page_404s_on_a_run_id_that_does_not_exist(seeded_client: TestClient) -> None:
     assert seeded_client.get("/api/trend/backtest?run_id=RUN-404").status_code == 404
+
+
+def test_us_t01_ac2_a_run_id_from_another_sleeve_is_not_served(tmp_path: Path) -> None:
+    """``run_id`` arrives in the query string, so the strategy filter still applies."""
+    db_path = tmp_path / "trend.db"
+    repos = make_db(db_path)
+    seed(repos)
+    carry = Repositories(repos.db, Strategy.CARRY)
+    carry.backtest.save_run(
+        "CARRY-RUN",
+        created_ts=to_ms("2026-09-11T00:00:00Z"),
+        start_day="2021-01-01",
+        end_day="2026-08-31",
+        variant="default",
+        params={},
+        manifest={},
+        git_commit="deadbee",
+        metrics={"sharpe": 4.2},
+        equity=[],
+        duration_s=1.0,
+    )
+    repos.close()
+
+    with build_client({"TREND": write_config(tmp_path, "TREND", db_path)}) as client:
+        assert client.get("/api/trend/backtest?run_id=CARRY-RUN").status_code == 404
+        body = client.get("/api/trend/backtest").json()
+        assert [r["run_id"] for r in body["runs"]] == ["RUN-1"]
+        assert body["run"]["run_id"] == "RUN-1"
 
 
 def test_a_held_symbol_with_no_target_still_appears_on_the_signals_page(tmp_path: Path) -> None:

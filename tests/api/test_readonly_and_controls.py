@@ -104,6 +104,34 @@ def test_us_t18_destructive_controls_need_the_typed_confirmation(
     assert len(after["control_log"]) == len(before["control_log"]) + 1  # the refused one wrote nothing
 
 
+def test_a_configured_confirmation_token_is_the_one_the_preflight_demands(
+    tmp_path: Path, seeded_path: Path
+) -> None:
+    """``phase.live_confirm`` overrides the default for the engine (aegis.ops.controls),
+    so the API must ask for the same string or the dashboard can never stop a sleeve."""
+    config = tmp_path / "trend.yaml"
+    config.write_text(
+        f"strategy: TREND\nmode: paper\nstorage:\n  db_path: {seeded_path}\nphase:\n  live_confirm: GO\n",
+        encoding="utf-8",
+    )
+    before = len(dump(seeded_path)["control_log"])
+    with build_client({"TREND": config}) as client:
+        default = client.post(
+            "/api/trend/controls",
+            json={"action": "stop", "operator": "alice", "reason": "drill", "confirm": CONFIRM_TOKEN},
+        )
+        assert default.status_code == 400  # the engine would refuse this one
+        assert "GO" in default.json()["detail"]
+        configured = client.post(
+            "/api/trend/controls",
+            json={"action": "stop", "operator": "alice", "reason": "drill", "confirm": "GO"},
+        )
+        assert configured.status_code == 202
+    after = dump(seeded_path)["control_log"]
+    assert len(after) == before + 1
+    assert after[-1]["payload_json"].count('"confirm":"GO"') == 1  # forwarded, not consumed
+
+
 def test_us_t13_ac3_clear_halt_requires_a_written_reason(tmp_path: Path, seeded_path: Path) -> None:
     with build_client({"TREND": write_config(tmp_path, "TREND", seeded_path)}) as client:
         response = client.post(

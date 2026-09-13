@@ -203,9 +203,11 @@ class PhaseGates:
         completed = repos.rebalances.count(kind="scheduled", status="complete")
         realised_bps, model_bps = self._cost_bps()
         tracking = repos.tracking.latest()
-        beats = 0 if start_ms is None else repos.heartbeats.count(start_ms, now_ms)
         interval_s = self.ctx.cfg.heartbeat.interval_s
-        uptime = repos.heartbeats.uptime_pct(start_ms, now_ms, interval_s) if beats else None
+        beats = 0 if start_ms is None else repos.heartbeats.count(start_ms, now_ms)
+        uptime = (
+            None if start_ms is None or not beats else repos.heartbeats.uptime_pct(start_ms, now_ms, interval_s)
+        )
         maker, _ = self._metric("maker_ratio", "since_inception")
 
         return [

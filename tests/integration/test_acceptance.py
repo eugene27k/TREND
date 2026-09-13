@@ -7,6 +7,7 @@ the whole engine rather than any one module.
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -281,6 +282,84 @@ def test_us_t17_ac2_weekly_and_monthly_reports_are_rendered_and_stored(traded):
     assert world.repos.reports.get("monthly", "2026-09") is not None
 
 
+def test_us_t17_ac4_the_governor_alert_carries_the_appendix_d_body(world):
+    """AC 4 is about the *format*: the alert the operator receives is Appendix D's."""
+    runner = TrendRunner(world, reporter=Reporter(world))
+    runner.start(world.clock.now_ms())
+    world.clock.set(to_ms(BARS_AT))
+    runner.tick(world.clock.now_ms())
+    world.clock.set(to_ms(REBALANCE_AT))
+    runner.tick(world.clock.now_ms())
+    positions = len(world.gateway.positions())
+    assert positions, "the cut needs a book to reduce"
+
+    # Next morning, equity 12.3 % below the peak: g must step 1.0 -> 0.5 (5.7).
+    world.gateway.set_account(wallet_balance=0.877 * 10_000.0)
+    world.clock.set(to_ms("2026-09-09T00:02:00Z"))
+    runner.tick(world.clock.now_ms())
+
+    alert = next(a for a in world.repos.alerts.recent() if a["code"] == "GOVERNOR")
+    lines = alert["message"].split("\n")
+    dd = float(world.repos.governor.history()[0]["dd"])
+    assert lines[0] == "TREND · WARN · GOVERNOR 1.0 → 0.5"
+    assert lines[2] == "Restore to 1.0 when DD < 8 %."
+
+    # Every number in the body against an independent source: the drawdown the
+    # governor acted on, the fixture's starting equity as the peak, the book it
+    # was about to reduce, and a gross that halves because g does.
+    shape = re.fullmatch(
+        r"Drawdown (?P<dd>[\d.]+) % from peak (?P<peak>[\d ]+\.\d\d)\. Immediate cut:"
+        r" gross (?P<before>[\d.]+)× → (?P<after>[\d.]+)×"
+        r" \((?P<orders>\d+) reduce-only orders, taker allowed\)\.",
+        lines[1],
+    )
+    assert shape is not None, lines[1]
+    assert float(shape["dd"]) == pytest.approx(dd * 100.0, abs=0.05)
+    assert 12.0 <= float(shape["dd"]) < 20.0, "the 1.0 -> 0.5 rung is DD >= 12 %"
+    assert shape["peak"] == "10 000.00"
+    assert float(shape["after"]) == pytest.approx(float(shape["before"]) / 2.0, abs=0.01)
+    assert int(shape["orders"]) == positions
+
+
+def test_us_t17_ac1_the_daily_report_covers_the_closed_day_and_is_sent(world):
+    """00:10 covers the day that closed — and a stored body is not a sent one."""
+    sent: list[str] = []
+    runner = TrendRunner(
+        world,
+        reporter=Reporter(world),
+        report_sender=lambda body: sent.append(body) is None,
+    )
+    runner.start(world.clock.now_ms())
+    world.clock.set(to_ms(BARS_AT))
+    runner.tick(world.clock.now_ms())
+    world.clock.set(to_ms(REBALANCE_AT))
+    runner.tick(world.clock.now_ms())
+
+    world.clock.set(to_ms("2026-09-09T00:10:00Z"))
+    report = runner.tick(world.clock.now_ms())
+
+    assert "daily_report:sent" in report.actions
+    yesterday = TODAY.isoformat()  # not 2026-09-09, which is ten minutes old
+    row = world.repos.reports.get("daily", yesterday)
+    assert row is not None, "the closed day is the one reported"
+    assert row["delivered"] == 1
+    assert sent and sent[0].startswith(f"TREND · daily · {yesterday}")
+    # The headline is the day's P&L by component (AC 1) — it must not read n/a
+    # merely because the 01:10 metrics job has not run yet.
+    assert sent[0].split("\n")[2].startswith("Net P&L day ")
+    assert "Net P&L day n/a" not in sent[0]
+
+
+def test_a_report_the_channel_refused_stays_undelivered(world):
+    runner = TrendRunner(world, reporter=Reporter(world), report_sender=lambda body: False)
+    runner.start(world.clock.now_ms())
+    world.clock.set(to_ms("2026-09-09T00:10:00Z"))
+    runner.tick(world.clock.now_ms())
+
+    row = world.repos.reports.get("daily", TODAY.isoformat())
+    assert row is not None and row["delivered"] == 0
+
+
 # --------------------------------------------------------------------------- #
 # US-T19 — deployment
 # --------------------------------------------------------------------------- #
@@ -308,6 +387,18 @@ def test_us_t19_ac1_compose_runs_both_sleeves_with_their_own_db_check_and_replic
     carry_env = services["carry"]["environment"]
     assert trend_env["AEGIS_STORAGE__DB_PATH"] != carry_env["AEGIS_STORAGE__DB_PATH"]
     assert services["trend"]["volumes"][0] != services["carry"]["volumes"][0]
+
+
+def test_us_t18_the_dashboard_can_append_the_control_row_it_must_write():
+    """The one write the API makes (control_log) needs a writable mount.
+
+    Every page is read through a mode=ro connection, so the single-writer rule
+    does not depend on the mount; the operator's Start/Pause/Stop/Flatten row
+    does (docs/SERVICES.md, PRD Section 7, US-T13 AC 3).
+    """
+    dashboard = _compose()["services"]["dashboard"]
+    for volume in dashboard["volumes"]:
+        assert not str(volume).endswith(":ro"), volume
 
 
 def test_us_t19_ac2_the_combined_footprint_is_bounded_below_the_free_shape():
