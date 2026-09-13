@@ -1,0 +1,99 @@
+# Both sleeves on one free host (PRD Section 13 / US-T19).
+#
+# The two services share an image and a machine but nothing else: separate
+# sub-accounts, separate SQLite files, separate Healthchecks pings and separate
+# Litestream replica paths. Software never moves capital between them
+# (Locked Decision 9) — there is no code path that could.
+#
+# CPU is the scarce resource on the 1-OCPU free shape, so the heavy jobs are
+# staggered: CARRY's daily metrics run at 00:05, TREND rebalances at 00:05, and
+# TREND's metrics job is pushed to 01:10 (Section 13, Appendix A).
+services:
+  trend:
+    build:
+      context: .
+      dockerfile: ops/docker/Dockerfile
+    image: aegis:latest
+    container_name: aegis-trend
+    restart: always
+    command: ["--strategy", "trend", "--mode", "${TREND_MODE:-paper}"]
+    environment:
+      AEGIS_STRATEGY: trend
+      AEGIS_MODE: ${TREND_MODE:-paper}
+      AEGIS_STORAGE__DB_PATH: /app/data/trend.db
+      AEGIS_BACKUP__LITESTREAM_REPLICA_PATH: ${TREND_REPLICA:-}
+      AEGIS_HEARTBEAT__URL: ${HEALTHCHECKS_URL_TREND:-}
+      AEGIS_METRICS__JOB_TIME_UTC: "01:10"
+      BINANCE_API_KEY: ${TREND_BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${TREND_BINANCE_API_SECRET:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      LIVE_CONFIRM: ${TREND_LIVE_CONFIRM:-}
+    volumes:
+      - trend-data:/app/data
+      - ./config:/app/config:ro
+    mem_limit: 448m
+    cpus: 0.8
+
+  carry:
+    build:
+      context: .
+      dockerfile: ops/docker/Dockerfile
+    image: aegis:latest
+    container_name: aegis-carry
+    restart: always
+    command: ["--strategy", "carry", "--mode", "${CARRY_MODE:-paper}"]
+    # PLACEHOLDER. This repository builds the TREND sleeve; CARRY's strategy
+    # modules and its config/carry.yaml belong to its own PRD and are not here,
+    # so the engine refuses --strategy carry. The service is provisioned anyway —
+    # its own database, Healthchecks check and Litestream replica path — because
+    # US-T19 AC 1 is about the host running both sleeves side by side, and this
+    # is the file that has to be right when CARRY lands. It stays behind a
+    # profile so `docker compose up -d` never starts something that cannot run.
+    profiles: ["carry"]
+    environment:
+      AEGIS_STRATEGY: carry
+      AEGIS_MODE: ${CARRY_MODE:-paper}
+      AEGIS_STORAGE__DB_PATH: /app/data/carry.db
+      AEGIS_BACKUP__LITESTREAM_REPLICA_PATH: ${CARRY_REPLICA:-}
+      AEGIS_HEARTBEAT__URL: ${HEALTHCHECKS_URL_CARRY:-}
+      AEGIS_METRICS__JOB_TIME_UTC: "00:05"
+      BINANCE_API_KEY: ${CARRY_BINANCE_API_KEY:-}
+      BINANCE_API_SECRET: ${CARRY_BINANCE_API_SECRET:-}
+    volumes:
+      - carry-data:/app/data
+      - ./config:/app/config:ro
+    mem_limit: 320m
+    cpus: 0.8
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: ops/docker/Dockerfile
+    image: aegis:latest
+    container_name: aegis-dashboard
+    restart: always
+    # --factory: aegis.api.app exposes create_app(), not a module-level `app`.
+    entrypoint: ["python", "-m", "uvicorn", "--factory", "aegis.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      # The API resolves each sleeve from its YAML (config/trend.yaml), whose
+      # relative db_path lands on the mounted volume. AEGIS_DASHBOARD_DIR is
+      # where the Dockerfile puts the built single-page app.
+      AEGIS_DASHBOARD_DIR: /app/ui
+    ports:
+      - "127.0.0.1:8000:8000"    # behind the host firewall; tunnel to reach it
+    volumes:
+      # The dashboard reads every page through SQLite's own mode=ro connection
+      # (aegis.api.deps.ReadOnlyDatabase), which is where the single-writer rule
+      # is enforced. The mount cannot be :ro as well: POST /api/{strategy}/controls
+      # appends the operator's Start/Pause/Stop/Flatten row to control_log for the
+      # engine to apply (docs/SERVICES.md, PRD Section 7, US-T13 AC 3), and on a
+      # read-only filesystem every control from the dashboard would fail instead.
+      - trend-data:/app/data
+      - carry-data:/app/carry-data
+    mem_limit: 192m
+    cpus: 0.3
+
+volumes:
+  trend-data:
+  carry-data:

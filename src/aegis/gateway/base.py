@@ -39,7 +39,9 @@ class ExchangeGateway(Protocol):
         """
         ...
 
-    def daily_bars(self, symbol: str, start: date | None = None, end: date | None = None, limit: int = 1500) -> list[DailyBar]:
+    def daily_bars(
+        self, symbol: str, start: date | None = None, end: date | None = None, limit: int = 1500
+    ) -> list[DailyBar]:
         """Closed daily klines, ascending by day. Paginates internally."""
         ...
 
@@ -53,7 +55,9 @@ class ExchangeGateway(Protocol):
         """``premiumIndex.lastFundingRate`` with the symbol's own interval (5.6)."""
         ...
 
-    def funding_history(self, symbol: str, start_ms: int | None = None, end_ms: int | None = None) -> list[FundingRate]:
+    def funding_history(
+        self, symbol: str, start_ms: int | None = None, end_ms: int | None = None
+    ) -> list[FundingRate]:
         """Realised funding settlements, ascending."""
         ...
 
