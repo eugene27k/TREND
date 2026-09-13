@@ -98,6 +98,15 @@ def test_us_t11_ac2_non_trading_status_is_returned_for_closure(
     assert status in warn["message"]
 
 
+def test_us_t11_ac2_the_status_read_is_never_a_cached_one(ctx: Context, watch: StatusWatch) -> None:
+    # 5.10 is a *fresh* exchangeInfo every 60 minutes; the live gateway caches the
+    # payload unless asked to refresh, so a cached read would make the watch blind
+    # to the one event it exists for.
+    watch.check(ctx.now_ms())
+
+    assert ctx.gateway.exchange_info_refreshes == 1
+
+
 def test_us_t11_ac2_two_symbols_changing_at_once_both_alert(ctx: Context, watch: StatusWatch) -> None:
     ctx.gateway.set_symbol_info("AAAUSDT", status="SETTLING")
     ctx.gateway.set_symbol_info("BBBUSDT", status="CLOSE")

@@ -90,9 +90,7 @@ def test_us_t03_ac1_backfill_skips_a_series_that_is_long_enough_and_current(
     assert ctx.gateway.calls["daily_bars"] == 1
 
 
-def test_us_t03_ac1_backfill_tops_up_a_stale_series(
-    ctx: Context, bars: BarService, clock: FakeClock
-) -> None:
+def test_us_t03_ac1_backfill_tops_up_a_stale_series(ctx: Context, bars: BarService, clock: FakeClock) -> None:
     # 5.1 step 3 ranks on "the median of the last 30 daily quote volumes", and a
     # candidate outside the traded universe gets no daily bar of its own: if a
     # long-but-stale series were skipped, every later month would rank on the
@@ -110,9 +108,7 @@ def test_us_t03_ac1_backfill_tops_up_a_stale_series(
     assert bars.closes(SYMBOL)[-1] == 100.0 + 449
 
 
-def test_us_t03_ac1_forward_filled_rows_do_not_pass_for_history(
-    ctx: Context, bars: BarService
-) -> None:
+def test_us_t03_ac1_forward_filled_rows_do_not_pass_for_history(ctx: Context, bars: BarService) -> None:
     # AC 2's placeholders are invisible to the selector's history gate, so they
     # must not make backfill believe the venue has already been asked.
     seed(ctx, SYMBOL, 3, end=LAST_CLOSED - timedelta(days=2))

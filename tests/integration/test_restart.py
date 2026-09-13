@@ -14,6 +14,7 @@ import pytest
 from aegis.core.clock import to_ms
 from aegis.core.errors import ExchangeUnreachable
 from aegis.core.types import EngineState
+from aegis.storage.db import json_loads
 from aegis.strategy_trend.runner import TrendRunner
 
 
@@ -78,29 +79,33 @@ def test_invariant1_a_block_stops_a_resume_from_growing_the_book(world):
     """A stored plan carries risk-increasing legs; a block forbids sending them.
 
     The plan was sized before the process died. If a kill rule, a reconciliation
-    break or an operator pause has raised a block in the meantime, replaying it
-    would be the engine growing exposure while only reductions are allowed
-    (Invariant 1 / Section 12). The deltas roll into the next rebalance instead,
-    which the hysteresis makes harmless (Locked Decision 7).
+    break, safe mode or an operator pause has raised a block in the meantime,
+    replaying the plan whole would be the engine growing exposure while only
+    reductions are allowed (Invariant 1 / Section 12). The reductions still go
+    out; the rest becomes a residual and rolls into the next rebalance, which the
+    hysteresis makes harmless (Locked Decision 7).
     """
     rebalance_id = _interrupted_rebalance(world)
-    traded_before = world.repos.rebalances.get(rebalance_id)["traded_notional"]
+    plan = json_loads(world.repos.rebalances.get(rebalance_id)["order_plan_json"], [])
+    increasing = {p["symbol"] for p in plan if not p["reduce_only"]}
+    assert increasing, "the fixture must leave risk-increasing legs unsent"
 
     world.gateway.clear_errors()
     world.gateway.set_fill_policy("immediate")
     world.clock.set(to_ms("2026-09-08T00:20:00Z"))
+    sent_before = len(world.gateway.placed)
 
     blocked = TrendRunner(world)
     blocked.machine.load()
     blocked.machine.block("reconciliation_break")
-
     report = blocked.start(world.clock.now_ms())
 
-    assert f"abandoned:{rebalance_id}" in report.actions
-    assert f"resumed:{rebalance_id}" not in report.actions
-    after = world.repos.rebalances.get(rebalance_id)
-    assert after["status"] == "window_end"
-    assert after["traded_notional"] == traded_before, "nothing more may be sent"
+    assert f"resumed:{rebalance_id}" in report.actions
+    sent = [r for r in world.gateway.placed[sent_before:]]
+    assert all(r.reduce_only for r in sent), (
+        f"only reduce-only orders may go out while blocked, got "
+        f"{[(r.symbol, r.reduce_only) for r in sent]}"
+    )
 
 
 def test_the_resumed_rebalance_never_overshoots_a_target(world):

@@ -166,7 +166,7 @@ class UniverseService:
         return self.repo.symbols(month) if month else []
 
     def leavers(self, now_ms: int) -> list[str]:
-        """Symbols included last month but not this one (US-T02 AC 3).
+        """Symbols in the previous selection but not in the current one (US-T02 AC 3).
 
         The caller flattens them at the next rebalance — a status change closes
         sooner (5.10), but an ordinary exit is not urgent and costs less inside

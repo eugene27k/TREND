@@ -168,8 +168,16 @@ class RebalanceExecutor:
             kind=kind,
         )
 
-    def resume(self, rebalance_id: str, end_ts_ms: int) -> RebalanceOutcome:
-        """Continue a persisted plan from its stored cursor (US-T09 AC 4)."""
+    def resume(self, rebalance_id: str, end_ts_ms: int, *, reducing_only: bool = False) -> RebalanceOutcome:
+        """Continue a persisted plan from its stored cursor (US-T09 AC 4).
+
+        ``reducing_only`` drops the risk-increasing half of the stored plan. The
+        plan was sized before the process died; if a block, a halt or safe mode
+        has been raised since, replaying it whole would be the engine growing
+        exposure while only reductions are allowed (Invariant 1). The reductions
+        still go out — they always may — and the rest becomes a residual that
+        rolls into the next rebalance.
+        """
         row = self.ctx.repos.rebalances.get(rebalance_id)
         if row is None:
             raise AegisError(f"cannot resume unknown rebalance {rebalance_id!r}")
@@ -191,6 +199,7 @@ class RebalanceExecutor:
             cursor=cursor,
             planned_notional=float(row["planned_notional"] or 0.0),
             kind=kind,
+            reducing_only=reducing_only,
         )
 
     def flatten_all(self, reason: str, now_ms: int) -> RebalanceOutcome:
@@ -295,6 +304,7 @@ class RebalanceExecutor:
         cursor: int,
         planned_notional: float,
         kind: str,
+        reducing_only: bool = False,
     ) -> RebalanceOutcome:
         escalate = escalate_s if escalate_s is not None else self.ctx.cfg.exec.escalate_s
         self._window_hit = False
@@ -311,7 +321,7 @@ class RebalanceExecutor:
         # guarantee.
         remaining_entries = [(i, plan[i]) for i in range(cursor, len(plan))]
         completed: set[int] = set(range(cursor))
-        for risk_reducing in (True, False):
+        for risk_reducing in ((True,) if reducing_only else (True, False)):
             wave = [(i, p) for i, p in remaining_entries if bool(p.risk_reducing) is risk_reducing]
             if not wave:
                 continue
@@ -335,6 +345,8 @@ class RebalanceExecutor:
             started_ts=started_ts,
             planned_notional=planned_notional,
             kind=kind,
+            # An entry we were forbidden to send is not an illiquid symbol.
+            record_illiquidity=not reducing_only,
         )
 
     def _run_wave(
@@ -758,6 +770,7 @@ class RebalanceExecutor:
         started_ts: int,
         planned_notional: float,
         kind: str,
+        record_illiquidity: bool = True,
     ) -> RebalanceOutcome:
         now = self.ctx.clock.now_ms()
         equity = self._equity()
@@ -827,7 +840,7 @@ class RebalanceExecutor:
                 f"{rebalance_id} hit the window end with {len(residuals)} residual delta(s)",
                 {"rebalance_id": rebalance_id, "residuals": residuals},
             )
-        if kind == KIND_SCHEDULED:
+        if kind == KIND_SCHEDULED and record_illiquidity:
             self._record_illiquidity(residuals, now)
 
         return RebalanceOutcome(
