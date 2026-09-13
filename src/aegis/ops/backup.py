@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -93,9 +93,26 @@ class Backup:
 
     # -- restore --------------------------------------------------------- #
 
-    def restore_check(self, path: str | Path) -> RestoreResult:
+    def replica_for(self, path: str | Path) -> Path:
+        """The replica that backs ``path``.
+
+        Each sleeve has "own ``trend.db``, own Litestream replica path" (Section
+        13), and the two live side by side in the same bucket — ``backups/trend``
+        beside ``backups/carry``. So this database's configured replica answers
+        for this database, and a sibling named after the other file answers for
+        it. Restoring every database from *this* replica would report the other
+        sleeve as permanently broken (US-T19 AC 4 asks for both to be verified,
+        not for one to be compared against the wrong backup).
+        """
+        source = Path(path)
+        if source == Path(self.ctx.cfg.storage.db_path):
+            return self.replica_path
+        return self.replica_path.parent / source.stem
+
+    def restore_check(self, path: str | Path, replica: str | Path | None = None) -> RestoreResult:
         """Restore ``path``'s replica into a temp dir and compare it to the live file."""
         source = Path(path)
+        target = Path(replica) if replica is not None else self.replica_for(source)
         if not source.exists():
             return RestoreResult(False, litestream_available(), str(source), "source database does not exist")
         if self.restorer is litestream_restore and not litestream_available():
@@ -103,7 +120,7 @@ class Backup:
 
         with TemporaryDirectory() as tmp:
             destination = Path(tmp) / f"restored-{source.name}"
-            if not self.restorer(self.replica_path, destination):
+            if not self.restorer(target, destination):
                 return RestoreResult(False, True, str(source), "restore failed")
             if not destination.exists():
                 return RestoreResult(False, True, str(source), "restore produced no file")
@@ -136,8 +153,14 @@ class Backup:
             live.close()
             copy.close()
 
-    def verify_all(self, paths: Sequence[str | Path]) -> dict[str, RestoreResult]:
-        """US-T19 AC 4: the restore test covers every database, not just this one."""
+    def verify_all(self, paths: Sequence[str | Path] | Mapping[str | Path, str | Path]) -> dict[str, RestoreResult]:
+        """US-T19 AC 4: the restore test covers every database, not just this one.
+
+        Pass a mapping of ``{database: replica}`` where the replica paths do not
+        follow the sibling convention of ``replica_for``.
+        """
+        if isinstance(paths, Mapping):
+            return {str(p): self.restore_check(p, replica) for p, replica in paths.items()}
         return {str(p): self.restore_check(p) for p in paths}
 
 

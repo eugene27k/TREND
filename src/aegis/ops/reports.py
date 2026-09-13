@@ -284,7 +284,8 @@ class Reporter:
         start = day_start_ms(day)
         repos = self.ctx.repos
         beats = repos.heartbeats.count(start, start + DAY_MS)
-        uptime = repos.heartbeats.uptime_pct(start, start + DAY_MS) if beats else None
+        interval_s = self.ctx.cfg.heartbeat.interval_s
+        uptime = repos.heartbeats.uptime_pct(start, start + DAY_MS, interval_s) if beats else None
         recon = repos.reconciliations.latest()
         recon_text = NA if recon is None else ("OK" if recon["ok"] else "BREAK")
         context = (repos.state.load() or {}).get("context") or {}

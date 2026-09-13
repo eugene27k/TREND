@@ -192,16 +192,51 @@ def test_litestream_restore_returns_false_when_the_binary_is_absent(
     assert litestream_restore(tmp_path / "replica", tmp_path / "out.db") is False
 
 
-def test_us_t19_ac4_verify_all_covers_every_database(bctx: Context, tmp_path: Path) -> None:
-    source = Path(bctx.cfg.storage.db_path)
-    second = tmp_path / "carry.db"
-    open_db(second).close()
+def test_us_t19_ac4_each_database_is_restored_from_its_own_replica(
+    bctx: Context, tmp_path: Path
+) -> None:
+    """Both databases are verified — neither is compared against the other's backup."""
+    trend = Path(bctx.cfg.storage.db_path)
+    carry = tmp_path / "carry.db"
+    db = open_db(carry)
+    Repositories(db, Strategy.CARRY).state.log_control("start", "alice", "seed a row", {}, NOW)
+    db.close()
 
-    results = Backup(bctx, _copy_restorer(source)).verify_all([source, second])
+    # One restorer, two replicas: whichever replica it is handed decides which
+    # database comes back — exactly how litestream behaves per replica path.
+    by_replica = {str(tmp_path / "replica"): trend, str(tmp_path / "carry"): carry}
 
-    assert set(results) == {str(source), str(second)}
-    assert results[str(source)].ok is True
-    assert results[str(second)].ok is False  # the carry rows are not in the trend replica
+    def restore(replica: Path, destination: Path) -> bool:
+        return _copy_restorer(by_replica[str(replica)])(replica, destination)
+
+    results = Backup(bctx, restore).verify_all([trend, carry])
+
+    assert set(results) == {str(trend), str(carry)}
+    assert results[str(trend)].ok is True, results[str(trend)].detail
+    assert results[str(carry)].ok is True, results[str(carry)].detail
+    assert results[str(carry)].row_counts["control_log"] == 1
+
+
+def test_the_second_database_resolves_to_its_sibling_replica_not_this_one(
+    bctx: Context, tmp_path: Path
+) -> None:
+    backup = Backup(bctx)
+
+    assert backup.replica_for(bctx.cfg.storage.db_path) == tmp_path / "replica"
+    assert backup.replica_for(tmp_path / "carry.db") == tmp_path / "carry"
+
+
+def test_restoring_a_database_from_the_wrong_replica_is_a_mismatch(
+    bctx: Context, tmp_path: Path
+) -> None:
+    """The row counts are what catch a backup wired to the wrong database."""
+    carry = tmp_path / "carry.db"
+    open_db(carry).close()  # same schema, no control_log row
+
+    result = Backup(bctx, _copy_restorer(carry)).restore_check(bctx.cfg.storage.db_path)
+
+    assert result.ok is False
+    assert any("control_log" in m for m in result.mismatches)
 
 
 def test_a_replica_that_is_a_single_file_still_reports_lag(bctx: Context, tmp_path: Path) -> None:

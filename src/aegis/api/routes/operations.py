@@ -101,12 +101,12 @@ class OperationsResponse(BaseModel):
     reports: list[ReportRow]
 
 
-def _uptime(repos: Any, now_ms: int, days: int) -> float | None:
+def _uptime(repos: Any, now_ms: int, days: int, interval_s: float) -> float | None:
     """None when no beat was recorded — "no evidence" is not "0 % uptime"."""
     start = now_ms - days * _DAY_MS
     if repos.heartbeats.count(start, now_ms + 1) == 0:
         return None
-    return repos.heartbeats.uptime_pct(start, now_ms + 1)
+    return repos.heartbeats.uptime_pct(start, now_ms + 1, interval_s)
 
 
 @router.get("/operations", response_model=OperationsResponse)
@@ -129,9 +129,9 @@ def operations(
         last_ts=int(last_beat["ts"]) if last_beat else None,
         last_ok=bool(last_beat["ok"]) if last_beat else None,
         beats_24h=beats.count(now_ms - _DAY_MS, now_ms + 1),
-        uptime_24h_pct=_uptime(repos, now_ms, 1),
-        uptime_7d_pct=_uptime(repos, now_ms, 7),
-        uptime_30d_pct=_uptime(repos, now_ms, 30),
+        uptime_24h_pct=_uptime(repos, now_ms, 1, cfg.heartbeat.interval_s),
+        uptime_7d_pct=_uptime(repos, now_ms, 7, cfg.heartbeat.interval_s),
+        uptime_30d_pct=_uptime(repos, now_ms, 30, cfg.heartbeat.interval_s),
     )
 
     last_recon = repos.reconciliations.latest()

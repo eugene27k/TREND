@@ -389,8 +389,8 @@ def seed(repos: Repositories, *, days: int = 40, symbols: tuple[str, ...] = SYMB
         now_ms=now_ms,
     )
     repos.state.log_control("start", "operator", "phase P1", {}, now_ms - 3_600_000)
-    for i in range(24):
-        repos.heartbeats.add(now_ms - i * 3_600_000, ok=True, detail="tick")
+    for i in range(24 * 12):  # a day of beats at the configured 300 s interval
+        repos.heartbeats.add(now_ms - i * 300_000, ok=True, detail="tick")
     repos.reconciliations.add(now_ms - 600_000, "positions", True, "clean", [])
     repos.reconciliations.add(
         now_ms - 300_000, "balance", False, "1.2 USDT drift", [{"asset": "USDT", "delta": 1.2}]

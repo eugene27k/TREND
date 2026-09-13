@@ -58,7 +58,8 @@ class Heartbeat:
             self.last_ping_ok = False
 
     def uptime_pct(self, start_ms: int, end_ms: int) -> float:
-        return self.ctx.repos.heartbeats.uptime_pct(start_ms, end_ms)
+        """Healthy beats over the beats the configured interval expected (Section 7 P1)."""
+        return self.ctx.repos.heartbeats.uptime_pct(start_ms, end_ms, self.ctx.cfg.heartbeat.interval_s)
 
     def prune(self, before_ms: int) -> None:
         """Heartbeats are the highest-volume table on the free host; keep it bounded."""

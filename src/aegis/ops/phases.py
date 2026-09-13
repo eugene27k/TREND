@@ -21,6 +21,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from aegis.backtest_trend.robustness import NOT_A_GATE
 from aegis.core.clock import DAY_MS
 from aegis.core.context import Context
 from aegis.core.types import Phase
@@ -180,10 +181,15 @@ class PhaseGates:
         ]
 
     def _robustness_sign_ok(self, run: dict[str, Any] | None) -> bool | None:
-        """None when no variant was ever run — an unasked question is not a pass."""
+        """None when no gating variant was ever run — an unasked question is not a pass.
+
+        ``governor_off`` is excluded: PRD 11.5 lists it "to show the governor's
+        contribution, **not a gate condition**", so a sign flip with the
+        governor switched off must not hold P0 back.
+        """
         if run is None:
             return None
-        rows = self.ctx.repos.backtest.robustness(run["run_id"])
+        rows = [r for r in self.ctx.repos.backtest.robustness(run["run_id"]) if r["variant"] not in NOT_A_GATE]
         if not rows:
             return None
         return all(bool(r["sign_ok"]) for r in rows)
@@ -198,7 +204,8 @@ class PhaseGates:
         realised_bps, model_bps = self._cost_bps()
         tracking = repos.tracking.latest()
         beats = 0 if start_ms is None else repos.heartbeats.count(start_ms, now_ms)
-        uptime = repos.heartbeats.uptime_pct(start_ms, now_ms) if beats else None
+        interval_s = self.ctx.cfg.heartbeat.interval_s
+        uptime = repos.heartbeats.uptime_pct(start_ms, now_ms, interval_s) if beats else None
         maker, _ = self._metric("maker_ratio", "since_inception")
 
         return [

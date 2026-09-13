@@ -1532,6 +1532,14 @@ class ApprovalRepo(_Repo):
         )
 
 
+def expected_beats(start_ms: int, end_ms: int, interval_s: float) -> int:
+    """How many beats a process beating every ``interval_s`` owes for the window."""
+    span_ms = max(0, int(end_ms) - int(start_ms))
+    if span_ms <= 0 or interval_s <= 0:
+        return 0
+    return max(1, round(span_ms / (interval_s * 1000.0)))
+
+
 class HeartbeatRepo(_Repo):
     def add(self, ts_ms: int, ok: bool, detail: str = "") -> None:
         self.db.execute(
@@ -1539,14 +1547,19 @@ class HeartbeatRepo(_Repo):
             (self.s, ts_ms, int(ok), detail),
         )
 
-    def uptime_pct(self, start_ms: int, end_ms: int) -> float:
-        rows = self.db.query(
-            "SELECT ok FROM heartbeats WHERE strategy = ? AND ts >= ? AND ts < ?",
-            (self.s, start_ms, end_ms),
-        )
-        if not rows:
+    def uptime_pct(self, start_ms: int, end_ms: int, interval_s: float) -> float:
+        """Healthy beats as a share of the beats ``interval_s`` expected in the window.
+
+        The denominator is deliberately *not* the number of rows found: a
+        process that was switched off wrote no rows at all, so dividing by what
+        it did write would report 100 % for a week of downtime and the Section 7
+        P1 criterion (heartbeat uptime >= 99.5 %) could never fail for the one
+        thing it exists to catch.
+        """
+        expected = expected_beats(start_ms, end_ms, interval_s)
+        if not expected:
             return 0.0
-        return 100.0 * sum(1 for r in rows if r["ok"]) / len(rows)
+        return min(100.0, 100.0 * self.count(start_ms, end_ms, ok_only=True) / expected)
 
     def last(self) -> dict[str, Any] | None:
         """The most recent beat — "when did this process last say it was alive"."""
@@ -1554,15 +1567,12 @@ class HeartbeatRepo(_Repo):
             "SELECT * FROM heartbeats WHERE strategy = ? ORDER BY ts DESC LIMIT 1", (self.s,)
         )
 
-    def count(self, start_ms: int, end_ms: int) -> int:
+    def count(self, start_ms: int, end_ms: int, *, ok_only: bool = False) -> int:
         """Beats recorded in the window. Zero means "no evidence", not "0 % uptime"."""
-        return int(
-            self.db.scalar(
-                "SELECT COUNT(*) FROM heartbeats WHERE strategy = ? AND ts >= ? AND ts < ?",
-                (self.s, start_ms, end_ms),
-            )
-            or 0
-        )
+        sql = "SELECT COUNT(*) FROM heartbeats WHERE strategy = ? AND ts >= ? AND ts < ?"
+        if ok_only:
+            sql += " AND ok = 1"
+        return int(self.db.scalar(sql, (self.s, start_ms, end_ms)) or 0)
 
     def prune(self, before_ms: int) -> None:
         self.db.execute("DELETE FROM heartbeats WHERE strategy = ? AND ts < ?", (self.s, before_ms))
@@ -1902,4 +1912,5 @@ __all__ = [
     "TrackingRepo",
     "TradeRepo",
     "UniverseRepo",
+    "expected_beats",
 ]

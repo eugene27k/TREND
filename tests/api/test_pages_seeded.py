@@ -145,7 +145,8 @@ def test_us_t18_ac6_metrics_page_returns_stored_values_with_n_obs_and_se(seeded_
 
 def test_us_t18_ac6_operations_reports_uptime_recon_alerts_and_infra(seeded_client: TestClient) -> None:
     body = seeded_client.get("/api/trend/operations").json()
-    assert body["heartbeat"]["beats_24h"] == 24
+    # The fixture beats at the configured 300 s interval, so a full day is 288.
+    assert body["heartbeat"]["beats_24h"] == 24 * 12
     assert body["heartbeat"]["uptime_24h_pct"] == 100.0
     assert body["reconciliation"]["open_breaks"] == 1
     assert body["reconciliation"]["breaks"][0]["kind"] == "balance"

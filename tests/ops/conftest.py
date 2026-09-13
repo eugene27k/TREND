@@ -101,8 +101,10 @@ def seed_daily(repos, *, day: date = DAY, equity: float = EQUITY) -> None:
         ]
     )
 
-    for minute in range(0, 1440, 60):
-        repos.heartbeats.add(day_start_ms(day) + minute * 60_000, True, "tick")
+    # A full day of beats at the configured 300 s interval: uptime is healthy
+    # beats over the beats the interval expected, so a day of gaps is downtime.
+    for beat in range(DAY_MS // 300_000):
+        repos.heartbeats.add(day_start_ms(day) + beat * 300_000, True, "tick")
     repos.reconciliations.add(end_ms - 1, "positions", True, "clean", [])
 
     repos.universe.save(

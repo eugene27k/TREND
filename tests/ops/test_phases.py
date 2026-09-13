@@ -149,6 +149,33 @@ def test_section7_p0_fails_when_a_robustness_variant_flips_the_sign(ctx: Context
     assert result.failing() == ("robustness_sign_unchanged",)
 
 
+def test_prd_11_5_6_the_governor_off_variant_does_not_gate_p0(ctx: Context) -> None:
+    """11.5.6: governor off exists "to show the governor's contribution, not a gate condition"."""
+    with_governor_off = [
+        *PASSING_ROBUSTNESS,
+        {"variant": "governor_off", "net_pnl": -50.0, "sharpe": -0.3, "max_dd": 0.5, "sign_ok": False},
+    ]
+    _save_backtest(ctx, PASSING_P0, with_governor_off)
+
+    result = PhaseGates(ctx).evaluate(Phase.P0_BACKTEST, NOW)
+
+    assert result.failing() == ()
+    assert _criteria(result)["robustness_sign_unchanged"]["actual"] is True
+
+
+def test_p0_robustness_is_unanswered_when_only_the_non_gating_variant_ran(ctx: Context) -> None:
+    _save_backtest(
+        ctx,
+        PASSING_P0,
+        [{"variant": "governor_off", "net_pnl": 10.0, "sharpe": 0.4, "max_dd": 0.3, "sign_ok": True}],
+    )
+
+    named = _criteria(PhaseGates(ctx).evaluate(Phase.P0_BACKTEST, NOW))
+
+    assert named["robustness_sign_unchanged"]["actual"] is None
+    assert named["robustness_sign_unchanged"]["passed"] is False
+
+
 def test_section7_p0_robustness_is_unanswered_when_no_variant_ran(ctx: Context) -> None:
     _save_backtest(ctx, PASSING_P0, robustness=None)
 
@@ -214,9 +241,12 @@ def _seed_p1(
         in_bounds=True,
         breach_days=0,
     )
-    for i in range(1000):
-        ok = not (uptime_gap and i < 20)
-        ctx.repos.heartbeats.add(start + i * 300_000, ok, "")
+    # Beats every 300 s across the whole window — uptime is healthy beats over
+    # the beats that interval expected, so a gap is downtime, not invisible.
+    beats = (NOW - start) // 300_000
+    unhealthy = int(beats * 0.02) if uptime_gap else 0
+    for i in range(beats):
+        ctx.repos.heartbeats.add(start + i * 300_000, i >= unhealthy, "")
 
 
 def _day(ms: int) -> date:
@@ -280,7 +310,31 @@ def test_section7_p1_needs_uptime_of_99_5_percent(ctx: Context) -> None:
 
     named = _criteria(PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW))
 
-    assert named["heartbeat_uptime_pct"]["actual"] == pytest.approx(98.0)
+    assert named["heartbeat_uptime_pct"]["actual"] == pytest.approx(98.0, abs=0.05)
+    assert named["heartbeat_uptime_pct"]["passed"] is False
+
+
+def test_section7_p1_uptime_counts_the_beats_a_dead_process_never_wrote(ctx: Context) -> None:
+    """A day of downtime in an eight-week window is 98.2 % uptime, not 100 %.
+
+    The beats the process failed to write are the downtime; dividing healthy
+    beats by the rows that happen to exist would make the criterion unfailable.
+    """
+    _seed_p1(ctx)
+    start = NOW - int(9.0 * WEEK_MS)
+    ctx.repos.heartbeats.prune(NOW + 1)  # start from a clean table
+    beats = (NOW - start) // 300_000
+    missing = DAY_MS // 300_000
+    for i in range(beats):
+        if i < missing:  # the process was off for the first day
+            continue
+        ctx.repos.heartbeats.add(start + i * 300_000, True, "")
+
+    named = _criteria(PhaseGates(ctx).evaluate(Phase.P1_PAPER, NOW))
+
+    assert named["heartbeat_uptime_pct"]["actual"] == pytest.approx(
+        100.0 * (beats - missing) / beats, abs=0.05
+    )
     assert named["heartbeat_uptime_pct"]["passed"] is False
 
 
