@@ -191,8 +191,9 @@ def cmd_backtest(cfg: AppConfig, args: argparse.Namespace) -> int:
     LOG.info("loaded %d symbols", len(bars))
 
     if args.fetch_archive and not _verify_archive(cfg, bars, end):
-        LOG.error("archive verification failed — refusing to backtest against data the "
-                  "exchange does not agree with")
+        LOG.error(
+            "archive verification failed — refusing to backtest against data the exchange does not agree with"
+        )
         return 3
 
     db = open_db(cfg.storage.db_path)

@@ -219,8 +219,9 @@ def test_a_day_missing_from_the_archive_is_a_defect():
     from aegis.backtest_trend.archive import verify_against_rest
 
     days = [date(2026, 9, 1), date(2026, 9, 2)]
-    result = verify_against_rest([_bar("BTCUSDT", days[0])],
-                                 [_bar("BTCUSDT", d) for d in days], symbol="BTCUSDT")
+    result = verify_against_rest(
+        [_bar("BTCUSDT", days[0])], [_bar("BTCUSDT", d) for d in days], symbol="BTCUSDT"
+    )
     assert not result.ok
     assert result.missing_in_archive == (days[1],)
     assert "absent from the archive" in result.summary()
@@ -231,8 +232,9 @@ def test_a_day_missing_from_rest_is_not_a_defect():
     from aegis.backtest_trend.archive import verify_against_rest
 
     days = [date(2026, 9, 1), date(2026, 9, 2)]
-    result = verify_against_rest([_bar("BTCUSDT", d) for d in days],
-                                 [_bar("BTCUSDT", days[1])], symbol="BTCUSDT")
+    result = verify_against_rest(
+        [_bar("BTCUSDT", d) for d in days], [_bar("BTCUSDT", days[1])], symbol="BTCUSDT"
+    )
     assert result.ok
     assert result.missing_in_rest == (days[0],)
 

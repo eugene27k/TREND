@@ -76,8 +76,10 @@ services:
     # --factory: aegis.api.app exposes create_app(), not a module-level `app`.
     entrypoint: ["python", "-m", "uvicorn", "--factory", "aegis.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      AEGIS_API__TREND_DB: /app/data/trend.db
-      AEGIS_API__CARRY_DB: /app/carry-data/carry.db
+      # The API resolves each sleeve from its YAML (config/trend.yaml), whose
+      # relative db_path lands on the mounted volume. AEGIS_DASHBOARD_DIR is
+      # where the Dockerfile puts the built single-page app.
+      AEGIS_DASHBOARD_DIR: /app/ui
     ports:
       - "127.0.0.1:8000:8000"    # behind the host firewall; tunnel to reach it
     volumes:

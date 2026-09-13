@@ -308,8 +308,8 @@ class PaperGateway:
         ):
             return True
         # GTX never reaches here: validate_order rejects a crossing post-only.
-        return request.price is not None and book is not None and crosses_book(
-            request.side, request.price, book
+        return (
+            request.price is not None and book is not None and crosses_book(request.side, request.price, book)
         )
 
     def _poll_resting_orders(self) -> None:
@@ -333,9 +333,7 @@ class PaperGateway:
                     # The position it was protecting is gone: the venue cancels
                     # the order rather than letting it open one (5.9 step 4).
                     self.books.add(
-                        replace_order(
-                            order, status=OrderStatus.CANCELED, updated_ts_ms=self.clock.now_ms()
-                        )
+                        replace_order(order, status=OrderStatus.CANCELED, updated_ts_ms=self.clock.now_ms())
                     )
                     continue
             self._fill(order, order.price, qty=qty, is_maker=True)

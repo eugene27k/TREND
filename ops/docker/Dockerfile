@@ -1,6 +1,18 @@
 # One image, two services. `docker compose` runs it twice with a different
 # --strategy, so CARRY and TREND share the build but never share a database
 # (PRD Section 6: one process per strategy, each with its own SQLite file).
+# The dashboard is built here and copied into the runtime image. Without this
+# stage the React app exists only under `vite dev`: the container runs uvicorn
+# alone, so every US-T18 page would 404 on the deployed host while the API
+# answered perfectly.
+FROM node:22-slim AS dashboard
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
+
 FROM python:3.12-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
@@ -32,6 +44,7 @@ COPY src ./src
 RUN pip install --no-cache-dir .
 
 COPY config ./config
+COPY --from=dashboard /ui/dist ./ui
 COPY ops/docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh \
  && useradd --create-home --uid 10001 aegis \

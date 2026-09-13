@@ -320,9 +320,7 @@ class Reconciler:
 
     def _symbols_with_income(self, start_ms: int, now_ms: int) -> set[str]:
         return {
-            str(row["symbol"])
-            for row in self.ctx.repos.ledger.between(start_ms, now_ms + 1)
-            if row["symbol"]
+            str(row["symbol"]) for row in self.ctx.repos.ledger.between(start_ms, now_ms + 1) if row["symbol"]
         }
 
 

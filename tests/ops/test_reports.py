@@ -458,7 +458,12 @@ def test_us_t17_ac2_the_regime_table_carries_pnl_hit_rate_and_exposure(rctx: Con
     rctx.repos.metrics.save_many(
         [
             MetricValue(
-                Strategy.TREND, "regime_table", "7d", None, rctx.now_ms(), n_obs=3,
+                Strategy.TREND,
+                "regime_table",
+                "7d",
+                None,
+                rctx.now_ms(),
+                n_obs=3,
                 extra={"buckets": buckets},
             ),
         ]

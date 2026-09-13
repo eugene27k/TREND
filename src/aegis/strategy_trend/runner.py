@@ -29,13 +29,15 @@ from aegis.accounting.ledger import LedgerService
 from aegis.accounting.reconcile import Reconciler
 from aegis.accounting.snapshots import SnapshotService
 from aegis.analytics.engine import MetricsEngine
+from aegis.backtest_trend.tracking import TrackingService
 from aegis.bars.service import BarService
 from aegis.core.clock import DAY_MS, at_utc, day_of, month_key
 from aegis.core.context import Context
 from aegis.core.errors import AegisError, ExchangeUnreachable, GatewayError, RateLimited
-from aegis.core.types import EngineState, Phase, RiskStatus, Severity
+from aegis.core.types import EngineState, MetricValue, Phase, RiskStatus, Severity
 from aegis.ops import reports as rp
 from aegis.ops.controls import FLATTEN_REQUEST, Controls
+from aegis.ops.resources import ResourceMonitor
 from aegis.portfolio.governor import governor, is_downward
 from aegis.portfolio.sizing import size_targets
 from aegis.rebalance.drift import DriftMonitor
@@ -91,6 +93,8 @@ class TrendRunner:
         self.attribution = Attribution(ctx)
         self.metrics = MetricsEngine(ctx)
         self.controls = Controls(ctx)
+        self.tracking = TrackingService(ctx)
+        self.resources = ResourceMonitor()
         self.heartbeat = heartbeat
         self.reporter = reporter
         #: ``(body) -> delivered``. A report is *stored* by the reporter and
@@ -130,9 +134,7 @@ class TrendRunner:
                 # (Invariant 1) — exactly as a freshly planned rebalance is
                 # filtered below.
                 state = self.machine.state
-                reducing_only = bool(
-                    state.halted or state.stopped or state.paused or state.blocks
-                )
+                reducing_only = bool(state.halted or state.stopped or state.paused or state.blocks)
                 # Safe mode is deliberately not in that list: the flag we just
                 # loaded records the fault that killed the process, not a live
                 # reading. If the venue is still unreachable the resume fails and
@@ -328,6 +330,7 @@ class TrendRunner:
             if days is not None:
                 self.machine.state.context[rp.BNB_DAYS_KEY] = days
                 self.machine.save()
+            self._record_resources(now_ms)
 
         if self.schedule.is_due(sch.STATUS_WATCH, now_ms):
             self.schedule.mark(sch.STATUS_WATCH, now_ms)
@@ -427,9 +430,7 @@ class TrendRunner:
             )
         report.note(f"governor_down:{after:g}")
 
-    def _governor_message(
-        self, dd: float, before: float, after: float, n_orders: int, *, down: bool
-    ) -> str:
+    def _governor_message(self, dd: float, before: float, after: float, n_orders: int, *, down: bool) -> str:
         """The Appendix D governor body (US-T17 AC 4) when a reporter is wired.
 
         Only for a cut: Appendix D's wording is "Immediate cut", which an upward
@@ -618,6 +619,16 @@ class TrendRunner:
                 )
             self.metrics.compute_all(now_ms)
             report.note("metrics")
+            # US-T16 AC 5: re-run the reference over the live period and compare.
+            # Without this the tracking-error kill rule can never fire, and the
+            # dashboard's status board reads green forever.
+            try:
+                tracked = self.tracking.update(yesterday, now_ms)
+            except Exception as exc:  # a comparison must never stop the engine
+                self.ctx.alerts.warn("TRACKING_FAILED", str(exc), {"day": yesterday.isoformat()})
+            else:
+                if tracked is not None:
+                    report.note(f"tracking:{'ok' if tracked.in_bounds else 'breach'}")
 
         if self.reporter is None:
             return
@@ -683,6 +694,24 @@ class TrendRunner:
     # ------------------------------------------------------------------ #
     # Helpers
     # ------------------------------------------------------------------ #
+
+    def _record_resources(self, now_ms: int) -> None:
+        """US-T19 AC 2: the footprint must be *measured*, not budgeted.
+
+        Sampled on the supervisor's 60 s tick so the CPU figure is a rate over a
+        minute rather than the process's lifetime average, which on a long-running
+        engine would flatten a rebalance spike into invisibility. A platform
+        without /proc records nothing, and the dashboard shows "n/a" rather than
+        a fabricated number.
+        """
+        rss, cpu = self.resources.measure(now_ms)
+        values = []
+        if rss is not None:
+            values.append(MetricValue(self.ctx.strategy, "rss_mb", "7d", rss, now_ms, n_obs=1))
+        if cpu is not None:
+            values.append(MetricValue(self.ctx.strategy, "cpu_pct", "7d", cpu, now_ms, n_obs=1))
+        if values:
+            self.ctx.repos.metrics.save_many(values)
 
     def _interval_elapsed(self, name: str, now_ms: int, seconds: float) -> bool:
         """True the first time, then only once ``seconds`` have passed.

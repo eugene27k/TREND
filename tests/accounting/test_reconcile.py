@@ -160,9 +160,7 @@ def test_us_10_ac2_cash_missing_from_the_ledger_is_a_break(ctx: Context, gateway
     assert result.breaks[0]["tolerance"] == pytest.approx(0.01)
 
 
-def test_us_10_ac2_an_open_position_does_not_hide_a_cash_break(
-    ctx: Context, gateway: FakeGateway
-) -> None:
+def test_us_10_ac2_an_open_position_does_not_hide_a_cash_break(ctx: Context, gateway: FakeGateway) -> None:
     """Unrealised P&L is added to the ledger side, never used as slack.
 
     Anchor 10 000 cash, no income rows, a position worth +300 unrealised and
@@ -183,9 +181,7 @@ def test_us_10_ac2_an_open_position_does_not_hide_a_cash_break(
     assert result.breaks[0]["tolerance"] == pytest.approx(0.01)
 
 
-def test_us_10_ac1_positions_abstain_without_a_baseline_snapshot(
-    ctx: Context, gateway: FakeGateway
-) -> None:
+def test_us_10_ac1_positions_abstain_without_a_baseline_snapshot(ctx: Context, gateway: FakeGateway) -> None:
     """A fresh database is not evidence that the venue liquidated us."""
     _meta(ctx, gateway)
     gateway.set_position("BTCUSDT", 2.0, entry_price=100.0, mark_price=100.0)

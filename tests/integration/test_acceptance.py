@@ -489,3 +489,133 @@ def test_a_venue_that_refuses_a_setting_warns_and_carries_on(world):
     world.gateway.inject_error("set_leverage", GatewayError("no such symbol"))
     assert runner.apply_account_settings(ctx.clock.now_ms()) == []
     assert any(a["code"] == "ACCOUNT_SETTINGS" for a in ctx.repos.alerts.recent())
+
+
+# --------------------------------------------------------------------------- #
+# The engine must actually CALL its services — not merely contain them
+# --------------------------------------------------------------------------- #
+
+
+def test_us_t16_ac5_the_runner_itself_runs_the_daily_comparison(traded):
+    """A service the engine never calls is an unimplemented criterion.
+
+    This caught a real regression: a refactor dropped the TrackingService wiring
+    and every test still passed, because they exercised the service directly.
+    """
+    world, runner = traded
+    assert hasattr(runner, "tracking"), "the runner must hold a TrackingService"
+
+    called: list[date] = []
+    runner.tracking.update = lambda day, now_ms=0: called.append(day) or None
+
+    world.clock.set(to_ms("2026-09-09T01:10:00Z"))  # the metrics job
+    report = runner.tick(world.clock.now_ms())
+    assert "metrics" in report.actions
+    assert called, "the metrics job must re-run the reference and compare (US-T16 AC 5)"
+
+
+def test_us_t19_ac2_the_runner_measures_its_own_footprint(traded):
+    """'measured and shown in the Operations page' — a container limit is a budget."""
+    world, runner = traded
+    assert hasattr(runner, "resources"), "the runner must hold a ResourceMonitor"
+
+    world.clock.set(to_ms("2026-09-08T00:20:00Z"))
+    runner.tick(world.clock.now_ms())
+    world.clock.set(to_ms("2026-09-08T00:22:00Z"))
+    runner.tick(world.clock.now_ms())
+
+    latest = world.repos.metrics.latest()
+    rss = latest.get("rss_mb:7d")
+    assert rss is not None, "no RSS was ever recorded, so the page shows blanks"
+    assert rss["value"] > 0
+    cpu = latest.get("cpu_pct:7d")
+    assert cpu is not None, "a rate needs two samples; the second tick must produce one"
+    assert 0.0 <= cpu["value"] <= 100.0 * 64
+
+
+def test_us_t19_ac2_the_operations_page_shows_the_measurement(traded, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from aegis.api.app import create_app
+
+    world, runner = traded
+    world.clock.set(to_ms("2026-09-08T00:20:00Z"))
+    runner.tick(world.clock.now_ms())
+    world.clock.set(to_ms("2026-09-08T00:22:00Z"))
+    runner.tick(world.clock.now_ms())
+
+    db_path = tmp_path / "trend.db"
+    source = Path("config/trend.yaml").read_text(encoding="utf-8")
+    config = tmp_path / "trend.yaml"
+    config.write_text(source.replace("db_path: data/trend.db", f"db_path: {db_path}"), encoding="utf-8")
+    # Copy the in-memory database out to a file the API can open read-only.
+    import sqlite3
+
+    target = sqlite3.connect(db_path)
+    world.repos.db._conn.backup(target)  # test plumbing: copy the in-memory DB to a file
+    target.close()
+
+    client = TestClient(create_app({"TREND": config}))
+    infra = client.get("/api/TREND/operations").json()["infra"]
+    assert infra["rss_mb"] is not None and infra["rss_mb"] > 0
+    assert infra["max_rss_mb"] == world.cfg.infra.max_rss_mb
+
+
+def test_us_t18_the_built_dashboard_is_actually_served(tmp_path):
+    """The container runs uvicorn alone, so an unmounted SPA means every page 404s.
+
+    This was real: the Dockerfile never built ui/dist and the app mounted no
+    static files, so the dashboard existed only under `vite dev`.
+    """
+    import importlib
+    import os
+    import shutil
+
+    from fastapi.testclient import TestClient
+
+    dist = Path("ui/dist")
+    if not dist.is_dir():
+        pytest.skip("ui/dist not built in this environment")
+
+    shutil.copytree(dist, tmp_path / "ui")
+    os.environ["AEGIS_DASHBOARD_DIR"] = str(tmp_path / "ui")
+    try:
+        import aegis.api.app as appmod
+
+        importlib.reload(appmod)
+        db_path = tmp_path / "trend.db"
+        open_db(db_path).close()
+        source = Path("config/trend.yaml").read_text(encoding="utf-8")
+        config = tmp_path / "trend.yaml"
+        config.write_text(source.replace("db_path: data/trend.db", f"db_path: {db_path}"), encoding="utf-8")
+        client = TestClient(appmod.create_app({"TREND": config}))
+
+        for route in ("/", "/overview", "/positions", "/controls"):
+            response = client.get(route)
+            assert response.status_code == 200, route
+            assert response.headers["content-type"].startswith("text/html"), route
+
+        # The API must still win: a catch-all that shadowed /api would be worse
+        # than not serving the dashboard at all.
+        assert client.get("/api/health").headers["content-type"].startswith("application/json")
+        assert client.get("/api/TREND/operations").status_code == 200
+    finally:
+        os.environ.pop("AEGIS_DASHBOARD_DIR", None)
+        import aegis.api.app as appmod
+
+        importlib.reload(appmod)
+
+
+def test_us_t19_the_image_builds_the_dashboard_and_copies_it_in():
+    dockerfile = Path("ops/docker/Dockerfile").read_text(encoding="utf-8")
+    assert "npm run build" in dockerfile, "the image must build the dashboard"
+    assert "COPY --from=dashboard /ui/dist ./ui" in dockerfile, "and copy it into the runtime"
+
+    compose = yaml.safe_load(Path("docker-compose.yml").read_text(encoding="utf-8"))
+    dashboard = compose["services"]["dashboard"]
+    assert dashboard["environment"]["AEGIS_DASHBOARD_DIR"] == "/app/ui"
+    assert "--factory" in dashboard["entrypoint"], (
+        "aegis.api.app exposes create_app(), not a module-level app"
+    )
+    # Dead configuration implies a knob that does not exist.
+    assert not [k for k in dashboard["environment"] if k.startswith("AEGIS_API__")]

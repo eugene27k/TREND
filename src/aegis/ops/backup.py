@@ -153,7 +153,9 @@ class Backup:
             live.close()
             copy.close()
 
-    def verify_all(self, paths: Sequence[str | Path] | Mapping[str | Path, str | Path]) -> dict[str, RestoreResult]:
+    def verify_all(
+        self, paths: Sequence[str | Path] | Mapping[str | Path, str | Path]
+    ) -> dict[str, RestoreResult]:
         """US-T19 AC 4: the restore test covers every database, not just this one.
 
         Pass a mapping of ``{database: replica}`` where the replica paths do not

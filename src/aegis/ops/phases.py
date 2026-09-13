@@ -189,7 +189,9 @@ class PhaseGates:
         """
         if run is None:
             return None
-        rows = [r for r in self.ctx.repos.backtest.robustness(run["run_id"]) if r["variant"] not in NOT_A_GATE]
+        rows = [
+            r for r in self.ctx.repos.backtest.robustness(run["run_id"]) if r["variant"] not in NOT_A_GATE
+        ]
         if not rows:
             return None
         return all(bool(r["sign_ok"]) for r in rows)
@@ -206,7 +208,9 @@ class PhaseGates:
         interval_s = self.ctx.cfg.heartbeat.interval_s
         beats = 0 if start_ms is None else repos.heartbeats.count(start_ms, now_ms)
         uptime = (
-            None if start_ms is None or not beats else repos.heartbeats.uptime_pct(start_ms, now_ms, interval_s)
+            None
+            if start_ms is None or not beats
+            else repos.heartbeats.uptime_pct(start_ms, now_ms, interval_s)
         )
         maker, _ = self._metric("maker_ratio", "since_inception")
 

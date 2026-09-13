@@ -12,11 +12,14 @@ Nothing here holds a writable connection open; see ``aegis.api.deps``.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from aegis.api.deps import Registry, get_registry
@@ -96,7 +99,42 @@ def create_app(config_paths: Mapping[str, str | Path] | None = None, clock: Cloc
     for router in ROUTERS:
         app.include_router(router)
 
+    _mount_dashboard(app)
     return app
+
+
+#: Where the built dashboard lands. In the container the Dockerfile copies it
+#: here; in development ``npm run dev`` serves it instead and this is absent.
+DASHBOARD_DIR = Path(os.environ.get("AEGIS_DASHBOARD_DIR", "/app/ui"))
+
+
+def _mount_dashboard(app: FastAPI) -> None:
+    """Serve the built single-page app, when there is one.
+
+    Without this the React app only exists under ``vite dev``: the container runs
+    uvicorn alone, so every page of US-T18 would 404 on the deployed host while
+    the API answered perfectly.
+
+    Mounted last, so it can never shadow an ``/api`` route, and silently skipped
+    when the build is absent — the API must still come up on a host that only
+    runs the engine.
+    """
+    index = DASHBOARD_DIR / "index.html"
+    if not index.is_file():
+        return
+
+    assets = DASHBOARD_DIR / "assets"
+    if assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{path:path}", include_in_schema=False)
+    def dashboard(path: str = "") -> FileResponse:
+        """Any non-API path returns index.html — the router runs in the browser."""
+        candidate = (DASHBOARD_DIR / path).resolve() if path else index
+        if path and candidate.is_file() and DASHBOARD_DIR.resolve() in candidate.parents:
+            return FileResponse(candidate)
+        return FileResponse(index)
 
 
 __all__ = ["HealthResponse", "StrategiesResponse", "StrategyInfo", "create_app", "get_registry"]

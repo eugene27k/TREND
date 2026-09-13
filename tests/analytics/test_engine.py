@@ -593,10 +593,7 @@ def test_us_t15_ac2_exposure_falls_back_to_attribution_when_no_snapshot_exists(e
     for day, rows in book.items():
         repos.symbol_pnl.upsert_many(
             day,
-            [
-                {"symbol": s, "side": side, "avg_notional": n, "net_pnl": 0.0}
-                for s, side, n in rows
-            ],
+            [{"symbol": s, "side": side, "avg_notional": n, "net_pnl": 0.0} for s, side, n in rows],
         )
 
     values = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")
@@ -837,10 +834,24 @@ def test_us_t15_ac2_funding_share_uses_pre_cost_pnl(engine_env) -> None:
     repos.symbol_pnl.upsert_many(
         days[-1],
         [
-            {"symbol": "BTCUSDT", "side": "long", "price_pnl": 60.0, "funding": 15.0,
-             "fees": 5.0, "slippage": 2.0, "net_pnl": 68.0},
-            {"symbol": "ETHUSDT", "side": "short", "price_pnl": 40.0, "funding": 10.0,
-             "fees": 3.0, "slippage": 1.0, "net_pnl": 46.0},
+            {
+                "symbol": "BTCUSDT",
+                "side": "long",
+                "price_pnl": 60.0,
+                "funding": 15.0,
+                "fees": 5.0,
+                "slippage": 2.0,
+                "net_pnl": 68.0,
+            },
+            {
+                "symbol": "ETHUSDT",
+                "side": "short",
+                "price_pnl": 40.0,
+                "funding": 10.0,
+                "fees": 3.0,
+                "slippage": 1.0,
+                "net_pnl": 46.0,
+            },
         ],
     )
     share = _by_name(MetricsEngine(ctx).compute_period("7d", NOW_MS), "7d")["funding_share"]
@@ -873,9 +884,7 @@ def test_us_t15_ac2_vol_target_adherence_counts_every_day_on_target(engine_env, 
     assert values["vol_target_adherence"].value == pytest.approx(1.0)
 
 
-def test_us_t15_ac2_vol_target_adherence_counts_no_day_when_the_book_runs_hot(
-    engine_env, config
-) -> None:
+def test_us_t15_ac2_vol_target_adherence_counts_no_day_when_the_book_runs_hot(engine_env, config) -> None:
     """Twice the target is outside the 1.5x band on every day — the fraction is 0."""
     ctx, repos = engine_env
     target = config.sizing.sigma_target_portfolio
@@ -957,9 +966,7 @@ def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env) -> 
     _seed_all(repos, 40)
 
     ytd = _by_name(MetricsEngine(ctx).compute_period("ytd", NOW_MS), "ytd")
-    since = _by_name(
-        MetricsEngine(ctx).compute_period("since_inception", NOW_MS), "since_inception"
-    )
+    since = _by_name(MetricsEngine(ctx).compute_period("since_inception", NOW_MS), "since_inception")
     assert ytd["sharpe"].extra["period_days"] == 273  # the window itself is untouched
     assert ytd["sharpe"].extra["live_days"] == 40
 
@@ -971,9 +978,7 @@ def test_us_t15_ac2_rate_metrics_use_the_days_the_sleeve_existed(engine_env) -> 
     assert infra.value == pytest.approx(m.net_of_infra(infra.extra["net_pnl"], 6.0, 40))
     assert infra.value == pytest.approx(since["net_of_infra"].value)
 
-    assert ytd["turnover"].extra["annualised"] == pytest.approx(
-        ytd["turnover"].value * 365 / 40
-    )
+    assert ytd["turnover"].extra["annualised"] == pytest.approx(ytd["turnover"].value * 365 / 40)
     # The governor was at g = 1 for the first half of the 40 days, not for the
     # 233 days before the sleeve existed.
     assert ytd["governor_time_g1"].value == pytest.approx(0.5)
