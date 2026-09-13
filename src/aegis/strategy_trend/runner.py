@@ -98,6 +98,8 @@ class TrendRunner:
         self.machine.load()
         self._started = True
 
+        self.apply_account_settings(now)
+
         unfinished = self.ctx.repos.rebalances.unfinished()
         if unfinished is not None:
             rebalance_id = str(unfinished["rebalance_id"])
@@ -173,6 +175,41 @@ class TrendRunner:
         report.state = str(self.machine.state.state)
         self.machine.state.context["last_tick"] = now_ms
         return report
+
+    def apply_account_settings(self, now_ms: int) -> list[str]:
+        """Locked Decision 1: 5x leverage, cross margin, on every universe symbol.
+
+        Leverage here is a *margin allocation* setting, not a risk setting —
+        actual exposure is governed by the Section 5.5 caps — but leaving it at
+        the venue's default changes the maintenance-margin schedule the risk
+        supervisor's survivability estimate is computed against, so the two
+        would silently disagree.
+
+        Only meaningful where orders reach a venue; paper and backtest have
+        nothing to configure. Failures are alerted, never fatal: a symbol whose
+        leverage could not be set is still tradeable, just on the wrong schedule.
+
+        The account-wide settings (one-way position mode, multi-assets OFF, BNB
+        fee discount ON) are not exposed by the futures API in a form we can set
+        safely, and are operator prerequisites — see docs/RUNBOOK.md.
+        """
+        if not self.ctx.cfg.mode.sends_real_orders:
+            return []
+        applied: list[str] = []
+        cfg = self.ctx.cfg
+        for symbol in self.universe.all_symbols(now_ms):
+            try:
+                self.ctx.gateway.set_margin_type(symbol, cfg.account.margin_type)
+                self.ctx.gateway.set_leverage(symbol, cfg.account.leverage)
+            except GatewayError as exc:
+                self.ctx.alerts.warn(
+                    "ACCOUNT_SETTINGS",
+                    f"could not set {symbol} to {cfg.account.leverage}x {cfg.account.margin_type}: {exc}",
+                    {"symbol": symbol},
+                )
+                continue
+            applied.append(symbol)
+        return applied
 
     # ------------------------------------------------------------------ #
     # 0. The operator's inbox
@@ -343,6 +380,8 @@ class TrendRunner:
             self.schedule.mark(sch.UNIVERSE, now_ms)
             if self.universe.refresh_if_due(now_ms) is not None:
                 report.note("universe_refresh")
+                # Entrants have never been configured at the venue.
+                self.apply_account_settings(now_ms)
 
         symbols = self.universe.current_symbols(now_ms)
         if self.schedule.is_due(sch.BARS, now_ms) and symbols:

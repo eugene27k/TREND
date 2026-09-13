@@ -27,7 +27,7 @@ from __future__ import annotations
 from datetime import date
 
 from aegis.bars.service import BarService
-from aegis.core.clock import add_months, at_utc, from_ms, month_key, month_start
+from aegis.core.clock import at_utc, from_ms, month_key, month_start
 from aegis.core.context import Context
 from aegis.core.types import SymbolInfo, UniverseResult
 from aegis.universe.select import select_universe
@@ -71,8 +71,8 @@ class UniverseService:
             candidates, self.ctx.cfg.universe.min_history_days, before=month_start(month)
         )
 
-        previous_month = self._previous_month(month)
-        before = set(self.repo.symbols(previous_month)) if self.repo.month(previous_month) else None
+        previous_month = self._previous_stored_month(month)
+        before = set(self.repo.symbols(previous_month)) if previous_month is not None else None
 
         result = select_universe(exchange_info, history, self.ctx.cfg.universe, month)
         self.repo.save(result, now_ms)
@@ -175,8 +175,8 @@ class UniverseService:
         month = self.effective_month(now_ms)
         if month is None:
             return []
-        previous = self._previous_month(month)
-        if self.repo.month(previous) is None:
+        previous = self._previous_stored_month(month)
+        if previous is None:
             return []
         current = set(self.repo.symbols(month))
         return sorted(s for s in self.repo.symbols(previous) if s not in current)
@@ -197,9 +197,16 @@ class UniverseService:
             return month
         return self.repo.latest_month()
 
-    @staticmethod
-    def _previous_month(month: str) -> str:
-        return month_key(add_months(month_start(month), -1))
+    def _previous_stored_month(self, month: str) -> str | None:
+        """The most recent *selected* month before ``month``, or ``None``.
+
+        Not ``month - 1``: an engine that was down across a month boundary has no
+        row for the calendar month before this one, and comparing against a month
+        that was never selected would report every symbol as an entrant and no
+        symbol as a leaver. The stored sequence is the history that actually
+        happened, which is also how the dashboard pairs its rows.
+        """
+        return max((m for m in self.repo.months() if m < month), default=None)
 
 
 def _reason(result: UniverseResult, symbol: str) -> str:

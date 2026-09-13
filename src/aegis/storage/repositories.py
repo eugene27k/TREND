@@ -1036,8 +1036,17 @@ class TargetRepo(_Repo):
         )
 
     def latest(self) -> list[dict[str, Any]]:
+        """The newest rebalance that actually sized a book.
+
+        Risk cuts write a ``rebalances`` row too and never write targets, so
+        taking the newest row outright makes every target vanish the moment a
+        governor cut or a flatten runs — and the drift monitor then reads every
+        position as having no target at all (US-T11 AC 1).
+        """
         rid = self.db.scalar(
-            "SELECT rebalance_id FROM rebalances WHERE strategy = ? ORDER BY started_ts DESC LIMIT 1",
+            "SELECT r.rebalance_id FROM rebalances r WHERE r.strategy = ? AND EXISTS ("
+            " SELECT 1 FROM targets t WHERE t.strategy = r.strategy"
+            " AND t.rebalance_id = r.rebalance_id) ORDER BY r.started_ts DESC LIMIT 1",
             (self.s,),
         )
         return self.for_rebalance(rid) if rid else []

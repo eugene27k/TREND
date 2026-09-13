@@ -347,3 +347,54 @@ def test_us_t19_ac4_the_restore_drill_covers_both_databases(tmp_path):
             ["--strategy", "trend", "--config", "config/trend.yaml", "--db", str(live)]
         )
         assert cmd_verify_restore(resolve_config(parsed), str(copy)) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Locked Decision 1 — the account is actually configured
+# --------------------------------------------------------------------------- #
+
+
+def test_locked_decision_1_leverage_and_margin_are_applied_to_every_symbol(world):
+    """Leaving the venue's defaults changes the maintenance-margin schedule the
+    risk supervisor's survivability estimate is computed against."""
+    demo = world.cfg.model_copy(update={"mode": Mode.DEMO})
+    ctx = type(world)(
+        cfg=demo, clock=world.clock, gateway=world.gateway, repos=world.repos, alerts=world.alerts
+    )
+    runner = TrendRunner(ctx)
+    runner.start(ctx.clock.now_ms())
+    ctx.clock.set(to_ms(BARS_AT))
+    runner.tick(ctx.clock.now_ms())
+
+    universe = ctx.repos.universe.symbols(ctx.repos.universe.latest_month())
+    assert universe
+    applied = runner.apply_account_settings(ctx.clock.now_ms())
+    assert set(applied) >= set(universe)
+    for symbol in universe:
+        assert world.gateway.leverage[symbol] == demo.account.leverage == 5
+        assert world.gateway.margin_type[symbol] == demo.account.margin_type == "CROSSED"
+
+
+def test_paper_mode_configures_nothing_at_the_venue(world):
+    """There is no venue to configure, and pretending otherwise hides a failure."""
+    runner = TrendRunner(world)
+    runner.start(world.clock.now_ms())
+    assert runner.apply_account_settings(world.clock.now_ms()) == []
+    assert world.gateway.leverage == {}
+
+
+def test_a_venue_that_refuses_a_setting_warns_and_carries_on(world):
+    from aegis.core.errors import GatewayError
+
+    demo = world.cfg.model_copy(update={"mode": Mode.DEMO})
+    ctx = type(world)(
+        cfg=demo, clock=world.clock, gateway=world.gateway, repos=world.repos, alerts=world.alerts
+    )
+    runner = TrendRunner(ctx)
+    runner.start(ctx.clock.now_ms())
+    ctx.clock.set(to_ms(BARS_AT))
+    runner.tick(ctx.clock.now_ms())
+
+    world.gateway.inject_error("set_leverage", GatewayError("no such symbol"))
+    assert runner.apply_account_settings(ctx.clock.now_ms()) == []
+    assert any(a["code"] == "ACCOUNT_SETTINGS" for a in ctx.repos.alerts.recent())

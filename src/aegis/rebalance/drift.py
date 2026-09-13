@@ -22,7 +22,6 @@ the only thing that acts (Invariant 1).
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 from aegis.core.context import Context
@@ -178,9 +177,17 @@ class DriftMonitor:
 
 
 def _drift_fraction(current_notional: float, target_notional: float) -> float:
-    """``|current - target| / |target|``; a position against a zero target is total drift."""
+    """``|current - target| / |target|``; a position against a zero target is total drift.
+
+    "Total" is 1.0, not ``inf``: the record goes into ``alerts.context_json`` and
+    out again over the API, and ``Infinity`` is not JSON — a strict renderer
+    refuses to serialise it, which would take the operations page down with the
+    very alert that was meant to warn the operator. With no target to divide by,
+    the whole position is the drift, so the fraction is measured against the
+    position: 100 % of what is held should not be there.
+    """
     if abs(target_notional) <= _QTY_TOL:
-        return 0.0 if abs(current_notional) <= _QTY_TOL else math.inf
+        return 0.0 if abs(current_notional) <= _QTY_TOL else 1.0
     return abs(current_notional - target_notional) / abs(target_notional)
 
 

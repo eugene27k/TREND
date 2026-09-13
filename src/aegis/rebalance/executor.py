@@ -406,6 +406,7 @@ class RebalanceExecutor:
         decision_mids.setdefault(planned.symbol, mid)
 
         n_slices = max(1, planned.n_slices)
+        base = self._slice_base(rebalance_id, planned.symbol)
         slice_start = self.ctx.clock.now_ms()
         twap_ms = min(self.ctx.cfg.exec.max_twap_min * 60_000, max(0, end_ts_ms - slice_start))
         interval_ms = twap_ms / n_slices
@@ -428,7 +429,7 @@ class RebalanceExecutor:
                 rebalance_id=rebalance_id,
                 planned=planned,
                 info=info,
-                seq=i,
+                seq=base + i,
                 side=Side.BUY if remaining > 0 else Side.SELL,
                 qty=qty,
                 decision_mid=mid,
@@ -777,7 +778,13 @@ class RebalanceExecutor:
             residual_qty = entry.target_qty - current_qty
             target_notional = entry.target_qty * mark
             current_notional = current_qty * mark
-            if not should_trade(target_notional, current_notional, equity, self.ctx.cfg.rebalance):
+            # An entry whose target is zero has to end flat: there is no band
+            # around "closed", so the band that hides small deltas must not hide
+            # a position we were told to close and did not (US-T10 AC 5).
+            must_be_flat = entry.target_qty == 0.0
+            if not should_trade(
+                target_notional, current_notional, equity, self.ctx.cfg.rebalance, not must_be_flat
+            ):
                 continue
             residuals.append(
                 {
@@ -871,6 +878,18 @@ class RebalanceExecutor:
             candidate = f"{kind}-{now_ms}-{suffix}"
             suffix += 1
         return candidate
+
+    def _slice_base(self, rebalance_id: str, symbol: str) -> int:
+        """Where this entry's slice numbering starts.
+
+        Slice ids are ``rebalance_id:symbol:n`` and ``slices.create`` replaces on
+        conflict, so a counter that restarted at zero per entry would overwrite
+        rows that are already there: the two legs of a flip are one symbol inside
+        one rebalance, and a resumed entry replays from its first slice. Counting
+        past what is stored keeps every slice's lifecycle (US-T10 AC 1).
+        """
+        rows = self.ctx.repos.slices.for_rebalance(rebalance_id)
+        return sum(1 for row in rows if row["symbol"] == symbol)
 
     def _equity(self) -> float:
         return self.ctx.gateway.account().equity
