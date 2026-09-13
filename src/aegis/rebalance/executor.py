@@ -321,7 +321,7 @@ class RebalanceExecutor:
         # guarantee.
         remaining_entries = [(i, plan[i]) for i in range(cursor, len(plan))]
         completed: set[int] = set(range(cursor))
-        for risk_reducing in ((True,) if reducing_only else (True, False)):
+        for risk_reducing in (True,) if reducing_only else (True, False):
             wave = [(i, p) for i, p in remaining_entries if bool(p.risk_reducing) is risk_reducing]
             if not wave:
                 continue
@@ -876,9 +876,19 @@ class RebalanceExecutor:
             )
 
     def _next_refresh_ms(self, now_ms: int) -> int:
-        """Flags last until the next monthly universe refresh clears them."""
-        first_next = add_months(day_of(now_ms).replace(day=1), 1)
-        return at_utc(first_next, self.ctx.cfg.universe.refresh_time_utc)
+        """Flags last until the next monthly universe refresh clears them.
+
+        The refresh day comes from config, clamped the same way
+        ``UniverseService`` clamps it: a flag that expired on a different day
+        from the refresh that is supposed to clear it would either free the
+        symbol early or hold it past its sentence.
+        """
+        cfg = self.ctx.cfg.universe
+        today = day_of(now_ms)
+        day = today.replace(day=min(cfg.refresh_day_utc, 28))
+        if day <= today:
+            day = add_months(day, 1)
+        return at_utc(day, cfg.refresh_time_utc)
 
     # ------------------------------------------------------------------ #
     # Small helpers

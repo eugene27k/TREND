@@ -167,10 +167,8 @@ def test_a_position_with_no_target_at_all_is_full_drift(
     # is stored as JSON and rendered by the API, and `Infinity` is not JSON — a
     # strict renderer raises rather than serialising it.
     assert found[0]["drift_frac"] == pytest.approx(1.0)
-    stored = repos.alerts.recent()[0]
-    assert json.loads(
-        stored["context_json"], parse_constant=_no_constants
-    )["drift_frac"] == pytest.approx(1.0)
+    stored = json.loads(repos.alerts.recent()[0]["context_json"], parse_constant=_no_constants)
+    assert stored["drift_frac"] == pytest.approx(1.0)
 
 
 def test_a_risk_cut_does_not_erase_the_reference_targets(
