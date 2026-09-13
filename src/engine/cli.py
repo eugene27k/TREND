@@ -177,6 +177,11 @@ def cmd_backtest(cfg: AppConfig, args: argparse.Namespace) -> int:
         funding[symbol] = rates
     LOG.info("loaded %d symbols", len(bars))
 
+    if args.fetch_archive and not _verify_archive(cfg, bars, end):
+        LOG.error("archive verification failed — refusing to backtest against data the "
+                  "exchange does not agree with")
+        return 3
+
     db = open_db(cfg.storage.db_path)
     repos = Repositories(db, cfg.strategy)
     try:
@@ -196,6 +201,45 @@ def cmd_backtest(cfg: AppConfig, args: argparse.Namespace) -> int:
         )
     )
     return 0
+
+
+def _verify_archive(cfg: AppConfig, bars: dict, end: date) -> bool:
+    """PRD 11.1: the archive is checked against the venue's own klines.
+
+    The archive is a convenience, not an authority. If it disagrees with the API,
+    the backtest is measuring a market that did not happen — and the failures
+    that matter (a shifted day boundary, a rescaled quote volume) change which
+    symbols the universe picks, silently.
+
+    Only runs on the networked ``--fetch-archive`` pass; the offline replay stays
+    offline and therefore deterministic.
+    """
+    from datetime import timedelta
+
+    from aegis.backtest_trend.archive import verify_against_rest
+    from aegis.core.clock import SystemClock
+    from aegis.gateway.binance import BinanceGateway
+
+    days = cfg.backtest.verify_rest_days
+    start = end - timedelta(days=days)
+    gateway = BinanceGateway(cfg, SystemClock())
+    ok = True
+    try:
+        for symbol in sorted(bars):
+            try:
+                rest = gateway.daily_bars(symbol, start=start, end=end)
+            except AegisError as exc:
+                LOG.warning("could not verify %s against REST: %s", symbol, exc)
+                continue
+            result = verify_against_rest(bars[symbol], rest, symbol=symbol)
+            if result.ok:
+                LOG.info("verified %s", result.summary())
+            else:
+                LOG.error("ARCHIVE MISMATCH %s", result.summary())
+                ok = False
+    finally:
+        gateway.close()
+    return ok
 
 
 def cmd_run(cfg: AppConfig, args: argparse.Namespace) -> int:

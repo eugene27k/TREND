@@ -64,27 +64,40 @@ class BarService:
 
         Defaults to ``cfg.universe.min_history_days`` (400) — the signal warm-up
         of 63 + 250 days plus buffer. ``gateway.daily_bars`` paginates internally,
-        so one call per symbol is enough. Symbols that already hold enough rows
-        are skipped, which makes a restart cheap and the call idempotent.
+        so one call per symbol is enough.
 
-        Returns ``{symbol: rows stored}``.
+        A symbol is skipped only when its stored series is **both long enough and
+        current**; a series that is long enough but stale gets its tail. Length
+        alone is not sufficient because the monthly refresh (5.1 step 3) ranks on
+        "the median of the last 30 daily quote volumes": a candidate outside the
+        traded universe receives no daily bar of its own, so skipping it on row
+        count would freeze its volume — and with it the ranking — at whatever the
+        first backfill happened to see. Only *realised* rows count, because a
+        forward-filled placeholder is not history (AC 2) and the selector does
+        not count one either.
+
+        Returns ``{symbol: realised rows held}``.
         """
         want = min_days if min_days is not None else self.ctx.cfg.universe.min_history_days
         end = self.last_closed_day()
         start = end - timedelta(days=want + BACKFILL_BUFFER_DAYS)
         out: dict[str, int] = {}
         for symbol in symbols:
-            if self.bars.count(symbol) >= want:
-                out[symbol] = self.bars.count(symbol)
+            have = self.bars.count(symbol, realised_only=True)
+            stored_end = self.bars.latest_day(symbol, realised_only=True)
+            through = date.fromisoformat(stored_end) if stored_end is not None else None
+            if have >= want and through is not None and through >= end:
+                out[symbol] = have
                 continue
+            since = through + timedelta(days=1) if (have >= want and through is not None) else start
             try:
-                fetched = self.ctx.gateway.daily_bars(symbol, start=start, end=end)
+                fetched = self.ctx.gateway.daily_bars(symbol, start=since, end=end)
             except GatewayError:
-                out[symbol] = self.bars.count(symbol)
+                out[symbol] = have
                 continue
             if fetched:
                 self.bars.upsert_many(replace(b, source="backfill") for b in fetched)
-            out[symbol] = self.bars.count(symbol)
+            out[symbol] = self.bars.count(symbol, realised_only=True)
         return out
 
     def fetch_closed_day(self, symbols: Sequence[str], day: date) -> tuple[set[str], set[str]]:

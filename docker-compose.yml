@@ -73,7 +73,8 @@ services:
     image: aegis:latest
     container_name: aegis-dashboard
     restart: always
-    entrypoint: ["python", "-m", "uvicorn", "aegis.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
+    # --factory: aegis.api.app exposes create_app(), not a module-level `app`.
+    entrypoint: ["python", "-m", "uvicorn", "--factory", "aegis.api.app:create_app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       AEGIS_API__TREND_DB: /app/data/trend.db
       AEGIS_API__CARRY_DB: /app/carry-data/carry.db

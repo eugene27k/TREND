@@ -3,6 +3,13 @@ import { api, type RebalanceDetail, type Strategy } from '../api'
 import { Empty, Loader, Panel, useApi } from '../components/Common'
 import { cls, num, pct, pctPoints, sideCls, ts, usd } from '../format'
 
+/** RebalanceStatus (aegis.core.types): an aborted run is a failure, not a neutral state. */
+const STATUS_TONE: Record<string, string> = {
+  complete: 'green',
+  window_end: 'amber',
+  aborted: 'red',
+}
+
 export function Rebalances({ strategy }: { strategy: Strategy }) {
   const { data, error, loading } = useApi((s) => api.rebalances(strategy, undefined, s), [strategy])
   const [open, setOpen] = useState<string | null>(null)
@@ -40,7 +47,7 @@ export function Rebalances({ strategy }: { strategy: Strategy }) {
                       <td>{r.day}</td>
                       <td className="muted">{r.kind}</td>
                       <td>
-                        <span className={`pill ${r.status === 'complete' ? 'green' : r.status === 'window_end' ? 'amber' : ''}`}>
+                        <span className={`pill ${STATUS_TONE[r.status] ?? ''}`}>
                           {r.status}
                         </span>
                       </td>

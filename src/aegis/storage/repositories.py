@@ -642,10 +642,12 @@ class BarRepo(_Repo):
             rows = rows[-limit:]
         return [self._to_bar(r) for r in rows]
 
-    def latest_day(self, symbol: str) -> str | None:
-        return self.db.scalar(
-            "SELECT MAX(day) FROM daily_bars WHERE strategy = ? AND symbol = ?", (self.s, symbol)
-        )
+    def latest_day(self, symbol: str, *, realised_only: bool = False) -> str | None:
+        """Newest stored day. ``realised_only`` ignores forward-filled placeholders."""
+        sql = "SELECT MAX(day) FROM daily_bars WHERE strategy = ? AND symbol = ?"
+        if realised_only:
+            sql += " AND filled = 0"
+        return self.db.scalar(sql, (self.s, symbol))
 
     def has_day(self, symbol: str, day: date | str) -> bool:
         return bool(
@@ -665,13 +667,17 @@ class BarRepo(_Repo):
             )
         ]
 
-    def count(self, symbol: str) -> int:
-        return int(
-            self.db.scalar(
-                "SELECT COUNT(*) FROM daily_bars WHERE strategy = ? AND symbol = ?", (self.s, symbol)
-            )
-            or 0
-        )
+    def count(self, symbol: str, *, realised_only: bool = False) -> int:
+        """Stored rows. ``realised_only`` counts bars that actually traded (US-T03 AC 2).
+
+        The history gate of 5.1 is a statement about prints, not about rows: a
+        forward-filled placeholder must not make a symbol look like it has the
+        400 days the selector demands.
+        """
+        sql = "SELECT COUNT(*) FROM daily_bars WHERE strategy = ? AND symbol = ?"
+        if realised_only:
+            sql += " AND filled = 0"
+        return int(self.db.scalar(sql, (self.s, symbol)) or 0)
 
     @staticmethod
     def _to_bar(r: dict[str, Any]) -> DailyBar:

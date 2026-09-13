@@ -19,7 +19,7 @@ import re
 import urllib.error
 import urllib.request
 import zipfile
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -259,4 +259,108 @@ def _parse_listing(body: bytes, prefix: str, *, files: bool) -> tuple[list[str],
     return names, truncated, last
 
 
-__all__ = ["BASE", "ArchiveFile", "ArchiveLoader", "Fetcher", "http_fetch"]
+# --------------------------------------------------------------------------- #
+# Verification against the live API (PRD 11.1)
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True, slots=True)
+class BarMismatch:
+    symbol: str
+    day: date
+    field: str
+    archive: float
+    rest: float
+
+    @property
+    def relative(self) -> float:
+        return abs(self.archive - self.rest) / abs(self.rest) if self.rest else float("inf")
+
+
+@dataclass(frozen=True, slots=True)
+class VerificationResult:
+    symbol: str
+    compared: int
+    missing_in_archive: tuple[date, ...]
+    missing_in_rest: tuple[date, ...]
+    mismatches: tuple[BarMismatch, ...]
+
+    @property
+    def ok(self) -> bool:
+        return not self.mismatches and not self.missing_in_archive
+
+    def summary(self) -> str:
+        if self.compared == 0:
+            return f"{self.symbol}: no overlapping days to compare"
+        if self.ok:
+            return f"{self.symbol}: {self.compared} days match"
+        parts = []
+        if self.missing_in_archive:
+            parts.append(f"{len(self.missing_in_archive)} day(s) absent from the archive")
+        if self.mismatches:
+            worst = max(self.mismatches, key=lambda m: m.relative)
+            parts.append(
+                f"{len(self.mismatches)} field mismatch(es), worst {worst.field} on "
+                f"{worst.day} ({worst.archive} vs {worst.rest})"
+            )
+        return f"{self.symbol}: " + "; ".join(parts)
+
+
+def verify_against_rest(
+    archive_bars: Sequence[DailyBar],
+    rest_bars: Sequence[DailyBar],
+    *,
+    symbol: str = "",
+    tolerance: float = 1e-6,
+) -> VerificationResult:
+    """Compare archive bars against the venue's own klines (PRD 11.1).
+
+    The archive is a convenience, not an authority: if it disagrees with the API
+    the backtest is measuring a market that did not happen. Comparing the recent
+    overlap is cheap and catches the failure modes that matter — a shifted day
+    boundary, a rescaled quote volume, a symbol whose files were rebuilt.
+
+    Days missing from the *archive* are a defect; days missing from REST are not
+    (the API's window is shorter, and it is the archive that is being checked).
+    """
+    by_day = {b.day: b for b in archive_bars}
+    rest_by_day = {b.day: b for b in rest_bars}
+    if not symbol:
+        symbol = next((b.symbol for b in rest_bars or archive_bars), "")
+
+    mismatches: list[BarMismatch] = []
+    compared = 0
+    for day in sorted(rest_by_day):
+        archive = by_day.get(day)
+        if archive is None:
+            continue
+        compared += 1
+        rest = rest_by_day[day]
+        for field in ("open", "high", "low", "close", "quote_volume"):
+            a, r = getattr(archive, field), getattr(rest, field)
+            if r == 0.0:
+                if a != 0.0:
+                    mismatches.append(BarMismatch(symbol, day, field, a, r))
+                continue
+            if abs(a - r) / abs(r) > tolerance:
+                mismatches.append(BarMismatch(symbol, day, field, a, r))
+
+    return VerificationResult(
+        symbol=symbol,
+        compared=compared,
+        missing_in_archive=tuple(sorted(set(rest_by_day) - set(by_day))),
+        missing_in_rest=tuple(sorted(set(by_day) - set(rest_by_day))),
+        mismatches=tuple(mismatches),
+    )
+
+
+__all__ = [
+    "BASE",
+    "ArchiveFile",
+    "ArchiveLoader",
+    "BarMismatch",
+    "Fetcher",
+    "VerificationResult",
+    "http_fetch",
+    "verify_against_rest",
+]

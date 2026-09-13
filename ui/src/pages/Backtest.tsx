@@ -109,7 +109,8 @@ export function Backtest({ strategy }: { strategy: Strategy }) {
                       .sort((a, b) => Number(a[0]) - Number(b[0]))
                       .map(([p, v]) => (
                         <tr key={p} className={Number(p) === 5 ? 'down' : ''}>
-                          <td>p{p}</td>
+                          {/* The API keys these by percentile as a float ("5.0"); label them p5. */}
+                          <td>p{Number.isFinite(Number(p)) ? Number(p) : p}</td>
                           <td className={cls(v)}>{usd(v, 0)}</td>
                         </tr>
                       ))}

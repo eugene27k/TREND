@@ -63,6 +63,14 @@ python -m engine --strategy trend --mode backtest --start 2021-01-01 --fetch-arc
 python -m engine --strategy trend --mode backtest --start 2021-01-01
 ```
 
+The `--fetch-archive` pass also **verifies the archive against the venue's own
+klines** for the last `backtest.verify_rest_days` (90) days, per PRD 11.1, and
+refuses to continue on a mismatch. The archive is a convenience, not an
+authority: if it disagrees with the API, the backtest is measuring a market that
+did not happen, and the failures that matter — a shifted day boundary, a
+rescaled quote volume — silently change which symbols the universe picks. The
+offline replay does no network I/O at all, which is what keeps it deterministic.
+
 The run stores, under one `run_id`: the equity path, metrics, per-symbol
 contribution, the 13 robustness variants, the walk-forward ranking, the bootstrap
 distribution, the manifest with per-symbol data checksums, and the git commit.
